@@ -283,19 +283,20 @@ class ProbabilityCalculatorService: Service() {
             timeSeries = input
         );
 
-        broadcastProgress(1,1,5,"REGIME_SWITCHING_FORECASTER");
+        broadcastProgress(1,1,6,"REGIME_SWITCHING_FORECASTER");
         val reportRSF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.REGIME_SWITCHING_FORECASTER)
             .calculate(calcParam)
         /* Don't work */
-        /*
+        broadcastProgress(20,2,6,"Monte Carlo Basic");
         val reportMCB = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.MONTE_CARLO_BASIC)
             .calculate(calcParam)
+        /*
         val reportMCA = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.MONTE_CARLO_ADVANCED)
             .calculate(calcParam) */
-        broadcastProgress(20,2,5,"PROBABILISTIC_FORECASTER");
+        broadcastProgress(30,3,6,"PROBABILISTIC_FORECASTER");
         val reportPFB = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.PROBABILISTIC_FORECASTER)
             .calculate(calcParam)
@@ -308,18 +309,18 @@ class ProbabilityCalculatorService: Service() {
         val reportMEF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.META_ENSEMBLE_FORECASTER)
             .calculate(calcParam)*/
-        broadcastProgress(40,3,5,"JUMP_DIFFUSION_FORECASTER");
+        broadcastProgress(40,4,6,"JUMP_DIFFUSION_FORECASTER");
         val reportJDF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.JUMP_DIFFUSION_FORECASTER)
             .calculate(calcParam)
-        broadcastProgress(60,4,5,"GARCH_FORECASTER");
+        broadcastProgress(60,5,6,"GARCH_FORECASTER");
         val reportGF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.GARCH_FORECASTER)
             .calculate(calcParam)
         /* val reportEF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.ENSEMBLE_FORECASTER)
             .calculate(calcParam) */
-        broadcastProgress(80,5,5,"BLACK_SCHOLES_FORECASTER");
+        broadcastProgress(80,6,6,"BLACK_SCHOLES_FORECASTER");
         val reportBSF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.BLACK_SCHOLES_FORECASTER)
             .calculate(calcParam)
@@ -341,9 +342,15 @@ Price Band Analysis:
 
 • Target Period: $days days
 
+• Interpreation: 
+
 Probabilistic Forecaster (Finance School)
 =====================
 $reportPFB
+
+Monte Carlo Basic Forecaster (Finance School)
+=====================
+$reportMCB
 
 Regime Switching Forecast (Markov Chains)
 =====================
