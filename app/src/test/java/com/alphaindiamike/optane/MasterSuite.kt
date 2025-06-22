@@ -10,7 +10,8 @@ import org.junit.runners.Suite
 @RunWith(Suite::class)
 @Suite.SuiteClasses(
     ProbabilisticForecasterTest::class,
-    MonteCarloBasicTest::class
+    MonteCarloBasicTest::class,
+    MonteCarloAdvancedTest::class
 )
 class AlgorithmTestSuite {
     // This class remains empty, it's just a holder for the above annotations

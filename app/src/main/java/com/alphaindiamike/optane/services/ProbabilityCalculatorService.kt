@@ -283,47 +283,50 @@ class ProbabilityCalculatorService: Service() {
             timeSeries = input
         );
 
-        broadcastProgress(1,1,6,"REGIME_SWITCHING_FORECASTER");
+        broadcastProgress(1,1,11,"Regime Switching Forecaster");
         val reportRSF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.REGIME_SWITCHING_FORECASTER)
             .calculate(calcParam)
-        /* Don't work */
-        broadcastProgress(20,2,6,"Monte Carlo Basic");
+        broadcastProgress(10,2,11,"Monte Carlo Basic");
         val reportMCB = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.MONTE_CARLO_BASIC)
             .calculate(calcParam)
-        /*
+        broadcastProgress(20,3,11,"Monte Carlo Advanced");
         val reportMCA = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.MONTE_CARLO_ADVANCED)
-            .calculate(calcParam) */
-        broadcastProgress(30,3,6,"PROBABILISTIC_FORECASTER");
+            .calculate(calcParam)
+        broadcastProgress(30,4,11,"Probabilistic Forecaster");
         val reportPFB = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.PROBABILISTIC_FORECASTER)
             .calculate(calcParam)
-        /* val reportQTF = AlgorithmFactory()
+        broadcastProgress(40,5,11,"Quantile Transformer Forecaster");
+        val reportQTF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.QUANTILE_TRANSFORMER_FORECASTER)
             .calculate(calcParam)
-        val reportTF = AlgorithmFactory()
+        broadcastProgress(50,6,11,"Transformer Forecaster");
+        val reportTF = AlgorithmFactory()//TODO
             .createAlgorithm(AlgorithmType.TRANSFORMER_FORECASTER)
             .calculate(calcParam)
-        val reportMEF = AlgorithmFactory()
+        broadcastProgress(55,7,11,"Meta Ensemble Forecaster");
+        val reportMEF = AlgorithmFactory()//TODO
             .createAlgorithm(AlgorithmType.META_ENSEMBLE_FORECASTER)
-            .calculate(calcParam)*/
-        broadcastProgress(40,4,6,"JUMP_DIFFUSION_FORECASTER");
+            .calculate(calcParam)
+        broadcastProgress(60,8,11,"Jump Diffusion Forecaster");
         val reportJDF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.JUMP_DIFFUSION_FORECASTER)
-            .calculate(calcParam)
-        broadcastProgress(60,5,6,"GARCH_FORECASTER");
+            .calculate(calcParam)//TODO
+        broadcastProgress(70,9,11,"GARCH Forecaster");
         val reportGF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.GARCH_FORECASTER)
-            .calculate(calcParam)
-        /* val reportEF = AlgorithmFactory()
+            .calculate(calcParam)//TODO
+        broadcastProgress(80,10,11,"Ensemble Forecaster");
+        val reportEF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.ENSEMBLE_FORECASTER)
-            .calculate(calcParam) */
-        broadcastProgress(80,6,6,"BLACK_SCHOLES_FORECASTER");
+            .calculate(calcParam) //TODO
+        broadcastProgress(90,11,11,"BLACK and SCHOLES Forecaster");
         val reportBSF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.BLACK_SCHOLES_FORECASTER)
-            .calculate(calcParam)
+            .calculate(calcParam)//TODO
         return """
 Asset Analysis Report
 =====================
@@ -337,12 +340,8 @@ Analysis Date: ${
         }
 
 Price Band Analysis:
-• Upper Band: ${String.format("%.2f", upperBand)}
-• Lower Band: ${String.format("%.2f", lowerBand)}
 
-• Target Period: $days days
-
-• Interpreation: 
+What is the probability the price will touch ${String.format("%.2f", upperBand)} EUR and ${String.format("%.2f", lowerBand)} EUR at any point during the next $days days.
 
 Probabilistic Forecaster (Finance School)
 =====================
@@ -351,6 +350,10 @@ $reportPFB
 Monte Carlo Basic Forecaster (Finance School)
 =====================
 $reportMCB
+
+Monte Carlo Advanced Forecaster
+=====================
+$reportMCA
 
 Regime Switching Forecast (Markov Chains)
 =====================
@@ -367,6 +370,22 @@ $reportGF
 Black-Scholes Forecaster
 =====================
 $reportBSF
+
+QUANTILE_TRANSFORMER_FORECASTER
+=====================
+$reportQTF
+
+TRANSFORMER_FORECASTER
+=====================
+$reportTF
+
+META_ENSEMBLE_FORECASTER
+=====================
+$reportMEF
+
+Ensemble Forecaster
+=====================
+$reportEF
 
 
 """.trimIndent()

@@ -5,12 +5,14 @@ import com.alphaindiamike.optane.model.Calculations
 import com.alphaindiamike.optane.database.entities.TimeSeriesEntity
 import kotlin.math.*
 import kotlin.random.Random
+import android.util.Log
 
 /**
  * Monte Carlo Advanced Implementation
  * Advanced Monte Carlo with variance reduction techniques
  */
-class MonteCarloAdvancedImpl : AlgorithmRepository {
+class MonteCarloAdvancedImpl(private val enableDebugLogging: Boolean = false) : AlgorithmRepository {
+
     // Advanced Monte Carlo configuration
     private data class AdvancedMCConfig(
         val numSimulations: Int = 50000,
@@ -45,19 +47,32 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
             return "upperBandProbability:0.0,lowerBandProbability:0.0"
         }
 
+        if (upperBand <= 0 || lowerBand <= 0) {
+            return "Invalid price bands"
+        }
+
+        if (upperBand <= lowerBand) {
+            return "Upper band must be greater than lower band"
+        }
+
         // 1. Calculate historical parameters
         val returns = calculateReturns(timeSeries)
         val meanReturn = calculateMeanReturn(returns)
         val volatility = calculateHistoricalVolatility(returns)
         val currentPrice = timeSeries.last().price
 
-        // 2. Calculate drift
-        val riskFreeRate = 0.025
-        val drift = riskFreeRate - 0.5 * volatility.pow(2)
+        // 2. Calculate drift - FIXED: use historical mean return for daily data
+        val riskFreeRate = 0.025 / 252.0 // Convert annual to daily
+        val drift = meanReturn // Use historical mean return (already daily)
+
+        // Debug logging
+        if (enableDebugLogging) {
+            logDebugInfo(currentPrice, meanReturn, volatility, drift, daysAhead)
+        }
 
         // 3. Run advanced Monte Carlo simulation
         val config = AdvancedMCConfig()
-        val result = runAdvancedMonteCarloSimulation(
+        val (probUpper, probLower, simulationResults) = runAdvancedMonteCarloSimulation(
             currentPrice = currentPrice,
             drift = drift,
             volatility = volatility,
@@ -67,9 +82,14 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
             config = config
         )
 
+        // Advanced analytics for debug logging
+        if (enableDebugLogging) {
+            logAdvancedAnalytics(simulationResults, currentPrice, volatility, daysAhead)
+        }
+
         return """
-            Upper band of ${upperBand.toString()} probability: ${String.format("%.1f", result.first)}%
-            Lower band of ${lowerBand.toString()} probability: ${String.format("%.1f", result.second)}%
+            Upper band of ${String.format("%.2f", upperBand)} probability: ${String.format("%.1f", probUpper)}%
+            Lower band of ${String.format("%.2f", lowerBand)} probability: ${String.format("%.1f", probLower)}%
             """.trimIndent()
     }
 
@@ -102,7 +122,7 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
         lowerBand: Double,
         daysAhead: Int,
         config: AdvancedMCConfig
-    ): Pair<Double, Double> {
+    ): Triple<Double, Double, List<SimulationResult>> {
 
         val allResults = mutableListOf<SimulationResult>()
         val baseSimulations = if (config.useAntitheticVariates) config.numSimulations / 2 else config.numSimulations
@@ -130,14 +150,14 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
             allResults
         }
 
-        // Calculate probabilities
+        // Calculate probabilities for touching bands at any point
         val reachesUpper = adjustedResults.count { it.hitsUpperBand }
         val reachesLower = adjustedResults.count { it.hitsLowerBand }
 
         val probUpper = (reachesUpper.toDouble() / adjustedResults.size) * 100
         val probLower = (reachesLower.toDouble() / adjustedResults.size) * 100
 
-        return Pair(probUpper, probLower)
+        return Triple(probUpper, probLower, adjustedResults)
     }
 
     private data class SimulationResult(
@@ -183,8 +203,8 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
             finalPrice = finalPrice,
             maxPrice = maxPrice,
             minPrice = minPrice,
-            hitsUpperBand = maxPrice >= upperBand,
-            hitsLowerBand = minPrice <= lowerBand,
+            hitsUpperBand = path.any { it >= upperBand }, // Touch at any point
+            hitsLowerBand = path.any { it <= lowerBand }, // Touch at any point
             pnl = finalPrice - currentPrice,
             path = path
         )
@@ -226,8 +246,8 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
             finalPrice = finalPrice,
             maxPrice = maxPrice,
             minPrice = minPrice,
-            hitsUpperBand = maxPrice >= upperBand,
-            hitsLowerBand = minPrice <= lowerBand,
+            hitsUpperBand = path.any { it >= upperBand }, // Touch at any point
+            hitsLowerBand = path.any { it <= lowerBand }, // Touch at any point
             pnl = finalPrice - currentPrice,
             path = path
         )
@@ -267,14 +287,18 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
         daysAhead: Int
     ): List<SimulationResult> {
 
-        // Use analytical expectation as control variate
-        val analyticalExpectation = currentPrice * exp(drift * daysAhead / 252.0)
+        // FIXED: Use daily scaling for control variate
+        val analyticalExpectation = currentPrice * exp(drift * daysAhead)
         val empiricalMean = results.map { it.finalPrice }.average()
-        val controlCoefficient = -0.5 // Optimal coefficient (simplified)
+
+        // Calculate optimal control coefficient
+        val covariance = results.map { (it.finalPrice - empiricalMean) * (it.finalPrice - analyticalExpectation) }.average()
+        val controlVariance = results.map { (it.finalPrice - analyticalExpectation).pow(2) }.average()
+        val optimalCoefficient = if (controlVariance > 0) -covariance / controlVariance else 0.0
 
         // Adjust results using control variate
         return results.map { result ->
-            val adjustment = controlCoefficient * (result.finalPrice - analyticalExpectation)
+            val adjustment = optimalCoefficient * (result.finalPrice - analyticalExpectation)
             val adjustedFinalPrice = result.finalPrice + adjustment
 
             result.copy(
@@ -292,7 +316,7 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
         randomNumbers: List<Double>
     ): List<Double> {
 
-        val dt = 1.0 / 252.0 // Daily time step
+        val dt = 1.0 // FIXED: Daily time step for daily data
         val prices = mutableListOf<Double>()
         var currentPrice = startPrice
 
@@ -300,6 +324,7 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
 
         for (i in 0 until minOf(timeSteps, randomNumbers.size)) {
             val normalRand = randomNumbers[i]
+            // FIXED: Proper GBM formula with daily scaling
             val priceChange = exp((drift - 0.5 * volatility.pow(2)) * dt + volatility * sqrt(dt) * normalRand)
             currentPrice *= priceChange
             prices.add(currentPrice)
@@ -339,6 +364,47 @@ class MonteCarloAdvancedImpl : AlgorithmRepository {
         val result = t - numerator / denominator
 
         return if (probability > 0.5) result else -result
+    }
+
+    // Debug logging method
+    private fun logDebugInfo(currentPrice: Double, meanReturn: Double, volatility: Double, drift: Double, daysAhead: Int) {
+        Log.d("MonteCarloAdvanced", "=== Advanced Monte Carlo Parameters ===")
+        Log.d("MonteCarloAdvanced", "Current Price: $currentPrice")
+        Log.d("MonteCarloAdvanced", "Historical Mean Return (Daily): $meanReturn")
+        Log.d("MonteCarloAdvanced", "Daily Volatility: $volatility")
+        Log.d("MonteCarloAdvanced", "Annual Volatility: ${volatility * sqrt(252.0)}")
+        Log.d("MonteCarloAdvanced", "Drift (Daily): $drift")
+        Log.d("MonteCarloAdvanced", "Days Ahead: $daysAhead")
+        Log.d("MonteCarloAdvanced", "Number of Simulations: ${AdvancedMCConfig().numSimulations}")
+        Log.d("MonteCarloAdvanced", "Variance Reduction Techniques:")
+        Log.d("MonteCarloAdvanced", "  - Antithetic Variates: ${AdvancedMCConfig().useAntitheticVariates}")
+        Log.d("MonteCarloAdvanced", "  - Control Variates: ${AdvancedMCConfig().useControlVariates}")
+        Log.d("MonteCarloAdvanced", "  - Stratified Sampling: ${AdvancedMCConfig().useStratifiedSampling}")
+    }
+
+    private fun logAdvancedAnalytics(results: List<SimulationResult>, currentPrice: Double, volatility: Double, daysAhead: Int) {
+        val varResult = calculateVaR(results)
+        val greeks = calculateGreeks(results, currentPrice, volatility, daysAhead)
+
+        Log.d("MonteCarloAdvanced", "=== Advanced Analytics ===")
+        Log.d("MonteCarloAdvanced", "Value at Risk:")
+        Log.d("MonteCarloAdvanced", "  - 95% VaR: ${String.format("%.2f", varResult.var95)}")
+        Log.d("MonteCarloAdvanced", "  - 99% VaR: ${String.format("%.2f", varResult.var99)}")
+        Log.d("MonteCarloAdvanced", "  - Expected Shortfall: ${String.format("%.2f", varResult.expectedShortfall)}")
+        Log.d("MonteCarloAdvanced", "  - Max Drawdown: ${String.format("%.2f%%", varResult.maxDrawdown * 100)}")
+
+        Log.d("MonteCarloAdvanced", "Greeks:")
+        Log.d("MonteCarloAdvanced", "  - Delta: ${String.format("%.4f", greeks.delta)}")
+        Log.d("MonteCarloAdvanced", "  - Gamma: ${String.format("%.4f", greeks.gamma)}")
+        Log.d("MonteCarloAdvanced", "  - Vega: ${String.format("%.4f", greeks.vega)}")
+        Log.d("MonteCarloAdvanced", "  - Theta: ${String.format("%.4f", greeks.theta)}")
+
+        val finalPrices = results.map { it.finalPrice }
+        Log.d("MonteCarloAdvanced", "Simulation Statistics:")
+        Log.d("MonteCarloAdvanced", "  - Mean Final Price: ${String.format("%.2f", finalPrices.average())}")
+        Log.d("MonteCarloAdvanced", "  - Std Dev: ${String.format("%.2f", sqrt(finalPrices.map { (it - finalPrices.average()).pow(2) }.average()))}")
+        Log.d("MonteCarloAdvanced", "  - Min Price: ${String.format("%.2f", finalPrices.minOrNull() ?: 0.0)}")
+        Log.d("MonteCarloAdvanced", "  - Max Price: ${String.format("%.2f", finalPrices.maxOrNull() ?: 0.0)}")
     }
 
     private fun calculateGreeks(
