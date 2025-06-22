@@ -11,7 +11,8 @@ import org.junit.runners.Suite
 @Suite.SuiteClasses(
     ProbabilisticForecasterTest::class,
     MonteCarloBasicTest::class,
-    MonteCarloAdvancedTest::class
+    MonteCarloAdvancedTest::class,
+    QuantileTransformerForecasterTest::class
 )
 class AlgorithmTestSuite {
     // This class remains empty, it's just a holder for the above annotations

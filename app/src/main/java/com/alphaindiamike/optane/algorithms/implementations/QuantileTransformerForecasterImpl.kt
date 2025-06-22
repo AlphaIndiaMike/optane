@@ -117,10 +117,12 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
             // DYNAMIC DATA LIMITING: Use config setting with intelligent fallback
             val maxDays = config.maxHistoryDays
             val limitedTimeSeries = if (timeSeries.size > maxDays) {
-                Log.d("QuantileForecaster", "Limiting data from ${timeSeries.size} to $maxDays days (config limit)")
+                if(enableDebugLogging == true){
+                Log.d("QuantileForecaster", "Limiting data from ${timeSeries.size} to $maxDays days (config limit)")}
                 timeSeries.takeLast(maxDays)
             } else {
-                Log.d("QuantileForecaster", "Using all ${timeSeries.size} days (under config limit of $maxDays)")
+                if(enableDebugLogging == true){
+                Log.d("QuantileForecaster", "Using all ${timeSeries.size} days (under config limit of $maxDays)")}
                 timeSeries
             }
 
@@ -166,7 +168,8 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
                 """.trimIndent()
 
         } catch (e: Exception) {
-            Log.e("QuantileForecaster", "Error in calculation: ${e.message}")
+            if(enableDebugLogging == true){
+            Log.e("QuantileForecaster", "Error in calculation: ${e.message}")}
             return "Calculation error: ${e.message}"
         } finally {
             // Clean up memory pool
@@ -193,7 +196,12 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
                         Thread.sleep(10) // Give GC time to work
                     }
                 } catch (e: Exception) {
-                    Log.w("QuantileForecaster", "Skipping feature extraction at index $i: ${e.message}")
+                    if(enableDebugLogging == true) {
+                        Log.w(
+                            "QuantileForecaster",
+                            "Skipping feature extraction at index $i: ${e.message}"
+                        )
+                    }
                     continue
                 }
             }
@@ -260,7 +268,12 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
                 }
             }
 
-            Log.d("QuantileForecaster", "Processed $processedCount features (max: $maxFeatures)")
+            if(enableDebugLogging == true) {
+                Log.d(
+                    "QuantileForecaster",
+                    "Processed $processedCount features (max: $maxFeatures)"
+                )
+            }
 
             // Fit scalers efficiently
             val featureNames = arrayOf(
@@ -339,7 +352,12 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
         // LIMIT input size if too large
         val maxSequenceLength = 50 // Reduced from unlimited
         val processInput = if (input.size > maxSequenceLength) {
-            Log.w("QuantileForecaster", "Trimming input from ${input.size} to $maxSequenceLength for memory")
+            if(enableDebugLogging == true) {
+                Log.w(
+                    "QuantileForecaster",
+                    "Trimming input from ${input.size} to $maxSequenceLength for memory"
+                )
+            }
             input.takeLast(maxSequenceLength).toTypedArray()
         } else {
             input
@@ -448,7 +466,12 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
         }
 
         if (historicalReturns.isEmpty()) {
-            Log.w("QuantileForecaster", "No historical returns available from original time series")
+            if(enableDebugLogging == true) {
+                Log.w(
+                    "QuantileForecaster",
+                    "No historical returns available from original time series"
+                )
+            }
             return quantiles.associateWith { 0.0 }
         }
 
@@ -458,9 +481,9 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
         val variance = historicalReturns.map { (it - meanReturn).pow(2) }.average()
         val stdDev = sqrt(variance)
 
-        // Use feature signal for directional bias only
+        // Use feature signal for directional bias only (FIXED: pass original data)
         val latestFeatures = features.last()
-        val featureSignal = calculateFeatureSignal(latestFeatures)
+        val featureSignal = calculateFeatureSignal(latestFeatures, originalTimeSeries, originalTimeSeries.size - 1)
 
         // Apply small feature-based bias to mean (max 10% of std dev)
         val adjustedMeanReturn = meanReturn + (featureSignal * stdDev * 0.1).coerceIn(-stdDev * 0.1, stdDev * 0.1)
@@ -484,14 +507,31 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
             predictions[q] = scaledQuantile
         }
 
-        Log.d("QuantileForecaster", "FIXED Quantile regression:")
-        Log.d("QuantileForecaster", "  Historical returns: ${historicalReturns.size} samples")
-        Log.d("QuantileForecaster", "  Mean return: ${String.format("%.6f", meanReturn)}")
-        Log.d("QuantileForecaster", "  Std dev: ${String.format("%.6f", stdDev)}")
-        Log.d("QuantileForecaster", "  Feature signal: ${String.format("%.4f", featureSignal)}")
-        Log.d("QuantileForecaster", "  Adjusted mean: ${String.format("%.6f", adjustedMeanReturn)}")
-        Log.d("QuantileForecaster", "  Sample predictions: 5%=${String.format("%.6f", predictions[0.05])}, 50%=${String.format("%.6f", predictions[0.5])}, 95%=${String.format("%.6f", predictions[0.95])}")
-
+        if (enableDebugLogging == true) {
+            Log.d("QuantileForecaster", "FIXED Quantile regression:")
+            Log.d("QuantileForecaster", "  Historical returns: ${historicalReturns.size} samples")
+            Log.d("QuantileForecaster", "  Mean return: ${String.format("%.6f", meanReturn)}")
+            Log.d("QuantileForecaster", "  Std dev: ${String.format("%.6f", stdDev)}")
+            Log.d("QuantileForecaster", "  Feature signal: ${String.format("%.4f", featureSignal)}")
+            Log.d(
+                "QuantileForecaster",
+                "  Adjusted mean: ${String.format("%.6f", adjustedMeanReturn)}"
+            )
+            Log.d(
+                "QuantileForecaster",
+                "  Sample predictions: 5%=${
+                    String.format(
+                        "%.6f",
+                        predictions[0.05]
+                    )
+                }, 50%=${String.format("%.6f", predictions[0.5])}, 95%=${
+                    String.format(
+                        "%.6f",
+                        predictions[0.95]
+                    )
+                }"
+            )
+        }
         return predictions
     }
 
@@ -520,19 +560,31 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
 
         return if (p <= 0.5) -result else result
     }
-    private fun calculateFeatureSignal(features: DoubleArray): Double {
-        if (features.size < 21) return 0.0
+    // FIXED: Calculate feature signal from ORIGINAL prices, not scaled features
+    private fun calculateFeatureSignal(
+        features: DoubleArray,
+        originalTimeSeries: List<TimeSeriesEntity>,
+        featureIndex: Int
+    ): Double {
+        if (originalTimeSeries.size < featureIndex + 1 || featureIndex < 8) return 0.0
 
-        // Combine momentum, volatility, and trend features
-        val momentum = (features[3] + features[4]) / 2.0 // momentum_3 + momentum_5
-        val volatility = (features[5] + features[6]) / 2.0 // volatility_3 + volatility_5
-        val trend = features[13] // trendStrength
-        val rsi = (features[7] + features[8]) / 2.0 // rsi_3 + rsi_5
+        val prices = originalTimeSeries.map { it.price }
+        val index = featureIndex
+
+        // Calculate signals from original price data
+        val momentum3 = getMomentum(prices, index, 3)
+        val momentum5 = getMomentum(prices, index, 5)
+        val volatility = getRollingVolatility(prices, index, 5)
+        val trend = getTrendStrength(prices, index, 5)
+        val rsi = getRSI(prices, index, 5)
+
+        // Combine momentum signals
+        val momentum = (momentum3 + momentum5) / 2.0
 
         // Normalize RSI to [-1, 1] range
         val rsiNormalized = (rsi - 50.0) / 50.0
 
-        // Combine signals with weights
+        // Combine signals with weights (same as before but using original data)
         val signal = momentum * 0.4 + trend * 0.3 + rsiNormalized * 0.2 - volatility * 0.1
 
         // Clamp to reasonable range
@@ -603,13 +655,18 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
         val logDistance = ln(targetPrice / currentPrice)
         val absLogDistance = abs(logDistance)
 
-        // Estimate volatility from price distribution
+        // FIXED: Proper volatility estimation from price distribution
         val p90Price = interpolatePrice(sortedPrices, sortedQuantiles, 0.9)
         val p10Price = interpolatePrice(sortedPrices, sortedQuantiles, 0.1)
-        val estimatedVolatility = abs(ln(p90Price / p10Price)) / (2 * getInverseNormalApprox(0.9))
 
-        // Time-scaled volatility
-        val timeScaledVol = estimatedVolatility * sqrt(daysAhead.toDouble())
+        // Correct calculation: P90-P10 range corresponds to 80% of distribution
+        // For normal distribution: P90-P10 ≈ 2.56σ (not 2*Φ⁻¹(0.9))
+        val p80Range = ln(p90Price / p10Price)
+        val estimatedVolatility = abs(p80Range) / 2.56 // 2.56 ≈ 2*(Φ⁻¹(0.9))
+
+        // FIXED: Consistent time scaling
+        val dailyVolatility = estimatedVolatility / sqrt(daysAhead.toDouble()) // Convert back to daily
+        val timeScaledVol = dailyVolatility * sqrt(daysAhead.toDouble()) // Re-scale consistently
 
         // Reflection principle: probability of touching barrier before expiry
         val d1 = absLogDistance / timeScaledVol
@@ -622,14 +679,26 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
             minOf(1.0, touchProbability)
         }
 
-        Log.d("QuantileForecaster", "Mathematical barrier calculation:")
-        Log.d("QuantileForecaster", "  Distance: ${String.format("%.4f", logDistance)}")
-        Log.d("QuantileForecaster", "  Estimated vol: ${String.format("%.4f", estimatedVolatility)}")
-        Log.d("QuantileForecaster", "  Time-scaled vol: ${String.format("%.4f", timeScaledVol)}")
-        Log.d("QuantileForecaster", "  d1 parameter: ${String.format("%.4f", d1)}")
-        Log.d("QuantileForecaster", "  End-point prob: ${String.format("%.4f", endPointProb)}")
-        Log.d("QuantileForecaster", "  Touch prob: ${String.format("%.4f", reflectionProbability)}")
-
+        if (enableDebugLogging == true) {
+            Log.d("QuantileForecaster", "FIXED Mathematical barrier calculation:")
+            Log.d("QuantileForecaster", "  Distance: ${String.format("%.4f", logDistance)}")
+            Log.d("QuantileForecaster", "  P90 price: ${String.format("%.2f", p90Price)}")
+            Log.d("QuantileForecaster", "  P10 price: ${String.format("%.2f", p10Price)}")
+            Log.d(
+                "QuantileForecaster",
+                "  Daily volatility: ${String.format("%.4f", dailyVolatility)}"
+            )
+            Log.d(
+                "QuantileForecaster",
+                "  Time-scaled vol: ${String.format("%.4f", timeScaledVol)}"
+            )
+            Log.d("QuantileForecaster", "  d1 parameter: ${String.format("%.4f", d1)}")
+            Log.d("QuantileForecaster", "  End-point prob: ${String.format("%.4f", endPointProb)}")
+            Log.d(
+                "QuantileForecaster",
+                "  Touch prob: ${String.format("%.4f", reflectionProbability)}"
+            )
+        }
         return reflectionProbability
     }
 
@@ -942,12 +1011,6 @@ class QuantileTransformerForecasterImpl(private val enableDebugLogging: Boolean 
         Log.d("QuantileForecaster", "  Dropout: ${config.dropout}")
 
         Log.d("QuantileForecaster", "=== END MATHEMATICAL DEBUG INFO ===")
-    }
-
-    // Clean up resources when done
-    fun cleanup() {
-        memoryPool.cleanup()
-        System.gc()
     }
 }
 

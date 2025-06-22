@@ -347,11 +347,11 @@ Probabilistic Forecaster (Finance School)
 =====================
 $reportPFB
 
-Monte Carlo Basic Forecaster (Finance School)
+Monte Carlo - Basic Forecaster
 =====================
 $reportMCB
 
-Monte Carlo Advanced Forecaster
+Monte Carlo - Advanced Forecaster
 =====================
 $reportMCA
 
@@ -371,7 +371,7 @@ Black-Scholes Forecaster
 =====================
 $reportBSF
 
-QUANTILE_TRANSFORMER_FORECASTER
+Quantile Transformer
 =====================
 $reportQTF
 
