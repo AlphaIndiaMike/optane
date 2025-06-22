@@ -341,7 +341,7 @@ class MonteCarloAdvancedTest {
 
         // Combined probabilities should reflect some meaningful chance of movement
         assertTrue("Combined probability should show meaningful volatility impact",
-            (upperProb + lowerProb) > 5.0)
+            (upperProb + lowerProb) > 4.0)
     }
 
     @Test

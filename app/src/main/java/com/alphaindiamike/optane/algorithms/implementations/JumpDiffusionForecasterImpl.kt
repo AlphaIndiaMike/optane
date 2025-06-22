@@ -1,38 +1,40 @@
 package com.alphaindiamike.optane.algorithms.implementations
 
 import kotlin.math.*
-import kotlin.random.Random
 import com.alphaindiamike.optane.database.entities.TimeSeriesEntity
 import com.alphaindiamike.optane.algorithms.AlgorithmRepository
 import com.alphaindiamike.optane.model.Calculations
-
+import android.util.Log
+import kotlin.random.Random
 /**
- * Jump-Diffusion Model (Merton Model)
- * Captures sudden price movements with jump processes
+ * Jump-Diffusion Forecaster - Final Implementation
+ * Calculates probability of touching price bands using first-passage time formulas
  */
-class JumpDiffusionForecasterImpl : AlgorithmRepository {
+class JumpDiffusionForecasterImpl(private val enableDebugLogging: Boolean = false) : AlgorithmRepository {
 
-    // Jump-diffusion parameters
-    private data class JumpParams(
-        val jumpIntensity: Double,      // λ - jumps per year
-        val averageJumpSize: Double,    // μ_J - average jump magnitude
-        val jumpVolatility: Double,     // σ_J - jump size volatility
-        val diffusionVolatility: Double // σ - continuous diffusion volatility
+    private data class JumpDiffusionParameters(
+        val diffusionMean: Double,
+        val diffusionVolatility: Double,
+        val jumpIntensity: Double,
+        val jumpMean: Double,
+        val jumpVolatility: Double
     )
 
     private data class JumpEvent(
         val index: Int,
         val jumpSize: Double,
-        val isJump: Boolean
+        val isJump: Boolean,
+        val confidence: Double
     )
 
-    private data class MertonParameters(
-        val drift: Double,              // μ - drift rate
-        val diffusionVol: Double,       // σ - diffusion volatility
-        val jumpIntensity: Double,      // λ - jump intensity
-        val jumpMean: Double,           // μ_J - mean jump size
-        val jumpStd: Double             // σ_J - jump size standard deviation
+    private data class JumpDiffusionConfig(
+        val minObservations: Int = 30,
+        val jumpDetectionWindow: Int = 10,
+        val confidenceLevel: Double = 0.99,
+        val maxHistoryDays: Int = 252
     )
+
+    private val config = JumpDiffusionConfig()
 
     override suspend fun calculate(calculations: Calculations): String {
         val timeSeries = calculations.timeSeries
@@ -41,383 +43,362 @@ class JumpDiffusionForecasterImpl : AlgorithmRepository {
         val daysAhead = calculations.daysPrediction
 
         // Validate input
-        if (timeSeries.size < 10) {
+        if (timeSeries.size < config.minObservations) {
             return "Insufficient data"
         }
 
-        // 1. Calculate returns
-        val returns = calculateReturns(timeSeries)
+        if (upperBand <= 0 || lowerBand <= 0) {
+            return "Invalid price bands"
+        }
 
-        // 2. Detect jumps in the return series
-        val jumpEvents = detectJumps(returns, threshold = 3.0)
+        if (upperBand <= lowerBand) {
+            return "Upper band must be greater than lower band"
+        }
 
-        // 3. Estimate jump-diffusion parameters
-        val jumpParams = estimateJumpParameters(returns, jumpEvents)
+        try {
+            val limitedTimeSeries = if (timeSeries.size > config.maxHistoryDays) {
+                timeSeries.takeLast(config.maxHistoryDays)
+            } else {
+                timeSeries
+            }
 
-        // 4. Separate diffusion component
-        val diffusionReturns = separateDiffusionComponent(returns, jumpEvents)
+            // 1. Calculate returns
+            val returns = calculateReturns(limitedTimeSeries)
 
-        // 5. Run Monte Carlo simulation with jumps
-        val result = monteCarloWithJumps(
-            currentPrice = timeSeries.last().price,
-            upperBand = upperBand,
-            lowerBand = lowerBand,
-            daysAhead = daysAhead,
-            jumpParams = jumpParams,
-            numSimulations = 10000
-        )
+            // 2. Detect jumps
+            val jumpEvents = detectJumpsDeterministic(returns)
 
-        return """
-            Upper band of ${upperBand.toString()} probability: ${String.format("%.1f", result.first)}%
-            Lower band of ${lowerBand.toString()} probability: ${String.format("%.1f", result.second)}%
-            """.trimIndent()
+            // 3. Estimate parameters
+            val parameters = estimateJumpDiffusionParameters(returns, jumpEvents)
+
+            // 4. Calculate first-passage probabilities
+            val currentPrice = limitedTimeSeries.last().price
+            val upperProbability = calculateFirstPassageProbability(
+                currentPrice = currentPrice,
+                barrier = upperBand,
+                timeHorizon = daysAhead.toDouble(),
+                parameters = parameters,
+                isUpper = true
+            )
+
+            val lowerProbability = calculateFirstPassageProbability(
+                currentPrice = currentPrice,
+                barrier = lowerBand,
+                timeHorizon = daysAhead.toDouble(),
+                parameters = parameters,
+                isUpper = false
+            )
+
+            if (enableDebugLogging) {
+                logDebugInfo(currentPrice, upperBand, lowerBand, daysAhead, parameters, upperProbability, lowerProbability)
+            }
+
+            return """
+                Upper band of ${upperBand} probability: ${String.format("%.1f", upperProbability * 100)}%
+                Lower band of ${lowerBand} probability: ${String.format("%.1f", lowerProbability * 100)}%
+                """.trimIndent()
+
+        } catch (e: Exception) {
+            Log.e("JumpDiffusion", "Error in calculation: ${e.message}")
+            return "Calculation error: ${e.message}"
+        }
     }
 
     private fun calculateReturns(timeSeries: List<TimeSeriesEntity>): List<Double> {
         val returns = mutableListOf<Double>()
         for (i in 1 until timeSeries.size) {
             val ret = ln(timeSeries[i].price / timeSeries[i-1].price)
-            returns.add(ret)
+            if (ret.isFinite()) {
+                returns.add(ret)
+            }
         }
         return returns
     }
 
-    private fun detectJumps(returns: List<Double>, threshold: Double = 3.0): List<JumpEvent> {
-        if (returns.size < 5) return emptyList()
+    private fun detectJumpsDeterministic(returns: List<Double>): List<JumpEvent> {
+        if (returns.size < config.jumpDetectionWindow * 2) {
+            return List(returns.size) { JumpEvent(it, 0.0, false, 0.0) }
+        }
 
-        // Calculate rolling statistics for jump detection
-        val window = minOf(10, returns.size / 2)
         val jumpEvents = mutableListOf<JumpEvent>()
+        val window = config.jumpDetectionWindow
+        val globalMean = returns.average()
+        val globalStd = sqrt(returns.map { (it - globalMean).pow(2) }.average())
 
         for (i in window until returns.size - window) {
-            // Calculate local statistics
-            val localReturns = returns.subList(i - window, i + window)
-            val localMean = localReturns.average()
-            val localStd = sqrt(localReturns.map { (it - localMean).pow(2) }.average())
+            val beforeWindow = returns.subList(maxOf(0, i - window), i)
+            val afterWindow = returns.subList(i + 1, minOf(returns.size, i + window + 1))
+            val localReturns = beforeWindow + afterWindow
 
-            // Detect jump using threshold method
-            val standardizedReturn = abs(returns[i] - localMean) / (localStd + 1e-8)
-            val isJump = standardizedReturn > threshold
+            if (localReturns.isNotEmpty()) {
+                val localMean = localReturns.average()
+                val localStd = sqrt(localReturns.map { (it - localMean).pow(2) }.average())
+                val adaptiveStd = maxOf(localStd, globalStd * 0.5)
+                val threshold = 4.0
 
-            jumpEvents.add(JumpEvent(
-                index = i,
-                jumpSize = if (isJump) returns[i] - localMean else 0.0,
-                isJump = isJump
-            ))
+                val standardizedReturn = abs(returns[i] - localMean) / adaptiveStd
+                val isJump = standardizedReturn > threshold
+                val confidence = if (isJump) min(0.99, standardizedReturn / threshold) else 0.0
+
+                jumpEvents.add(JumpEvent(
+                    index = i,
+                    jumpSize = if (isJump) returns[i] - localMean else 0.0,
+                    isJump = isJump,
+                    confidence = confidence
+                ))
+            } else {
+                jumpEvents.add(JumpEvent(i, 0.0, false, 0.0))
+            }
         }
 
         return jumpEvents
     }
 
-    private fun estimateJumpParameters(returns: List<Double>, jumps: List<JumpEvent>): JumpParams {
-        // Separate jump and non-jump returns
-        val jumpReturns = jumps.filter { it.isJump }.map { it.jumpSize }
-        val nonJumpReturns = returns.filterIndexed { index, _ ->
-            jumps.find { it.index == index }?.isJump != true
+    private fun estimateJumpDiffusionParameters(
+        returns: List<Double>,
+        jumpEvents: List<JumpEvent>
+    ): JumpDiffusionParameters {
+
+        val jumps = jumpEvents.filter { it.isJump }
+        val jumpSizes = jumps.map { it.jumpSize }
+
+        // Calculate diffusion component (returns without jumps)
+        val diffusionReturns = returns.filterIndexed { index, _ ->
+            jumpEvents.find { it.index == index }?.isJump != true
         }
 
-        // Estimate jump parameters
+        val diffusionMean = if (diffusionReturns.isNotEmpty()) {
+            diffusionReturns.average()
+        } else {
+            returns.average()
+        }
+
+        val diffusionVolatility = if (diffusionReturns.size > 1) {
+            val mean = diffusionReturns.average()
+            sqrt(diffusionReturns.map { (it - mean).pow(2) }.average())
+        } else {
+            sqrt(returns.map { (it - returns.average()).pow(2) }.average())
+        }
+
+        // Jump parameters (daily units)
         val jumpIntensity = if (returns.isNotEmpty()) {
-            (jumpReturns.size.toDouble() / returns.size) * 252.0 // Annualized
-        } else 0.0
+            jumps.size.toDouble() / returns.size
+        } else {
+            0.0
+        }
 
-        val averageJumpSize = if (jumpReturns.isNotEmpty()) {
-            jumpReturns.average()
-        } else 0.0
+        val jumpMean = if (jumpSizes.isNotEmpty()) {
+            jumpSizes.average()
+        } else {
+            0.0
+        }
 
-        val jumpVolatility = if (jumpReturns.size > 1) {
-            val jumpMean = jumpReturns.average()
-            sqrt(jumpReturns.map { (it - jumpMean).pow(2) }.average())
-        } else 0.02
+        val jumpVolatility = if (jumpSizes.size > 1) {
+            val mean = jumpSizes.average()
+            sqrt(jumpSizes.map { (it - mean).pow(2) }.average())
+        } else {
+            maxOf(0.01, diffusionVolatility)
+        }
 
-        // Estimate diffusion volatility from non-jump returns
-        val diffusionVolatility = if (nonJumpReturns.size > 1) {
-            val mean = nonJumpReturns.average()
-            sqrt(nonJumpReturns.map { (it - mean).pow(2) }.average())
-        } else 0.02
+        // Smart volatility constraint: only boost if it's unrealistically low AND we have normal market data
+        val minVolatility = if (diffusionVolatility < 0.001 && jumps.size < returns.size * 0.05) {
+            // Very low vol + few jumps = probably constant data, keep it low
+            0.001
+        } else {
+            // Normal market data with some volatility
+            0.015
+        }
 
-        return JumpParams(
-            jumpIntensity = jumpIntensity,
-            averageJumpSize = averageJumpSize,
-            jumpVolatility = jumpVolatility,
-            diffusionVolatility = diffusionVolatility
+        return JumpDiffusionParameters(
+            diffusionMean = maxOf(-0.2, minOf(0.2, diffusionMean)),
+            diffusionVolatility = maxOf(minVolatility, minOf(0.2, diffusionVolatility)),
+            jumpIntensity = maxOf(0.0, minOf(0.2, jumpIntensity)),
+            jumpMean = maxOf(-0.5, minOf(0.5, jumpMean)),
+            jumpVolatility = maxOf(0.01, minOf(0.5, jumpVolatility))
         )
     }
 
-    private fun separateDiffusionComponent(returns: List<Double>, jumpEvents: List<JumpEvent>): List<Double> {
-        // Remove jump components to isolate diffusion
-        val diffusionReturns = returns.toMutableList()
+    private fun calculateFirstPassageProbability(
+        currentPrice: Double,
+        barrier: Double,
+        timeHorizon: Double,
+        parameters: JumpDiffusionParameters,
+        isUpper: Boolean
+    ): Double {
 
-        jumpEvents.forEach { jumpEvent ->
-            if (jumpEvent.isJump && jumpEvent.index < diffusionReturns.size) {
-                diffusionReturns[jumpEvent.index] = diffusionReturns[jumpEvent.index] - jumpEvent.jumpSize
-            }
+        // Check if already past barrier
+        if ((isUpper && currentPrice >= barrier) || (!isUpper && currentPrice <= barrier)) {
+            return 1.0
         }
 
-        return diffusionReturns
+        val maxTerms = 10
+        var totalProbability = 0.0
+
+        // Sum over possible number of jumps
+        for (n in 0 until maxTerms) {
+            val lambda = parameters.jumpIntensity * timeHorizon
+            val poissonProb = if (lambda > 0) {
+                exp(-lambda) * lambda.pow(n) / factorial(n)
+            } else {
+                if (n == 0) 1.0 else 0.0
+            }
+
+            val conditionalProb = calculateConditionalFirstPassage(
+                currentPrice = currentPrice,
+                barrier = barrier,
+                timeHorizon = timeHorizon,
+                numJumps = n,
+                parameters = parameters,
+                isUpper = isUpper
+            )
+
+            totalProbability += poissonProb * conditionalProb
+
+            if (poissonProb < 1e-6) break
+        }
+
+        return minOf(1.0, maxOf(0.0, totalProbability))
     }
 
-    private fun monteCarloWithJumps(
+    private fun calculateConditionalFirstPassage(
+        currentPrice: Double,
+        barrier: Double,
+        timeHorizon: Double,
+        numJumps: Int,
+        parameters: JumpDiffusionParameters,
+        isUpper: Boolean
+    ): Double {
+
+        // Include jump effects
+        val totalJumpContribution = numJumps * parameters.jumpMean
+        val totalJumpVariance = numJumps * parameters.jumpVolatility.pow(2)
+
+        val effectiveDrift = parameters.diffusionMean
+        val effectiveVolatility = sqrt(
+            parameters.diffusionVolatility.pow(2) + totalJumpVariance / timeHorizon
+        )
+
+        // Adjust starting price by jumps
+        val adjustedStartPrice = currentPrice * exp(totalJumpContribution)
+
+        return calculateFirstPassageGBM(
+            startPrice = adjustedStartPrice,
+            barrier = barrier,
+            drift = effectiveDrift,
+            volatility = effectiveVolatility,
+            timeHorizon = timeHorizon,
+            isUpper = isUpper
+        )
+    }
+
+    private fun generateNormalRandom(): Double {
+        val u1 = kotlin.random.Random.Default.nextDouble()
+        val u2 = kotlin.random.Random.Default.nextDouble()
+        return sqrt(-2.0 * ln(u1)) * cos(2.0 * PI * u2)
+    }
+
+    /**
+     * Correct first-passage probability formula for GBM
+     */
+    private fun calculateFirstPassageGBM(
+        startPrice: Double,
+        barrier: Double,
+        drift: Double,
+        volatility: Double,
+        timeHorizon: Double,
+        isUpper: Boolean
+    ): Double {
+
+        // Handle edge case: already at or past barrier
+        if ((isUpper && startPrice >= barrier) || (!isUpper && startPrice <= barrier)) {
+            return 1.0
+        }
+
+        if (timeHorizon <= 0.0 || volatility <= 0.0) {
+            return 0.0
+        }
+
+        val mu = drift
+        val sigma = volatility
+        val T = timeHorizon
+        val S0 = startPrice
+        val B = barrier
+
+        val logRatio = ln(B / S0)
+        val sigmaSqrtT = sigma * sqrt(T)
+
+        // First-passage probability using correct analytical formula
+        val d1 = (-logRatio + mu * T) / sigmaSqrtT
+        val d2 = (-logRatio - mu * T) / sigmaSqrtT
+
+        val prob1 = if (isUpper) {
+            1.0 - normalCDF(d1)
+        } else {
+            normalCDF(d1)
+        }
+
+        val alpha = 2.0 * mu / (sigma * sigma)
+        val reflectionTerm = (B / S0).pow(alpha)
+
+        val prob2 = if (isUpper) {
+            reflectionTerm * normalCDF(d2)
+        } else {
+            reflectionTerm * (1.0 - normalCDF(d2))
+        }
+
+        return minOf(1.0, maxOf(0.0, prob1 + prob2))
+    }
+
+    private fun normalCDF(x: Double): Double {
+        if (x < -6.0) return 0.0
+        if (x > 6.0) return 1.0
+
+        val b1 = 0.319381530
+        val b2 = -0.356563782
+        val b3 = 1.781477937
+        val b4 = -1.821255978
+        val b5 = 1.330274429
+        val p = 0.2316419
+        val c = 0.39894228
+
+        val absX = abs(x)
+        val t = 1.0 / (1.0 + p * absX)
+        val phi = c * exp(-0.5 * absX * absX) * t * (b1 + t * (b2 + t * (b3 + t * (b4 + t * b5))))
+
+        return if (x >= 0.0) 1.0 - phi else phi
+    }
+
+    private fun factorial(n: Int): Double {
+        if (n <= 1) return 1.0
+        var result = 1.0
+        for (i in 2..n) {
+            result *= i
+        }
+        return result
+    }
+
+    private fun logDebugInfo(
         currentPrice: Double,
         upperBand: Double,
         lowerBand: Double,
         daysAhead: Int,
-        jumpParams: JumpParams,
-        numSimulations: Int
-    ): Pair<Double, Double> {
-
-        var reachesUpper = 0
-        var reachesLower = 0
-
-        repeat(numSimulations) {
-            val path = simulateJumpDiffusionPath(
-                startPrice = currentPrice,
-                timeHorizon = daysAhead,
-                jumpParams = jumpParams
-            )
-
-            val maxPrice = path.maxOrNull() ?: currentPrice
-            val minPrice = path.minOrNull() ?: currentPrice
-
-            if (maxPrice >= upperBand) reachesUpper++
-            if (minPrice <= lowerBand) reachesLower++
-        }
-
-        val probUpper = (reachesUpper.toDouble() / numSimulations) * 100
-        val probLower = (reachesLower.toDouble() / numSimulations) * 100
-
-        return Pair(probUpper, probLower)
-    }
-
-    private fun simulateJumpDiffusionPath(
-        startPrice: Double,
-        timeHorizon: Int,
-        jumpParams: JumpParams
-    ): List<Double> {
-
-        val dt = 1.0 / 252.0 // Daily time step
-        val prices = mutableListOf<Double>()
-        var currentPrice = startPrice
-
-        prices.add(currentPrice)
-
-        repeat(timeHorizon) {
-            // 1. Generate number of jumps in this time step (Poisson process)
-            val numJumps = poissonProcess(jumpParams.jumpIntensity * dt)
-
-            // 2. Generate diffusion component (Geometric Brownian Motion)
-            val normalRandom = generateNormalRandom()
-            val diffusionComponent = exp(
-                (0.0 - 0.5 * jumpParams.diffusionVolatility.pow(2)) * dt +
-                        jumpParams.diffusionVolatility * sqrt(dt) * normalRandom
-            )
-
-            // 3. Generate jump component
-            var jumpComponent = 1.0
-            repeat(numJumps) {
-                val jumpSize = jumpParams.averageJumpSize +
-                        jumpParams.jumpVolatility * generateNormalRandom()
-                jumpComponent *= exp(jumpSize)
-            }
-
-            // 4. Combined price evolution: S(t+dt) = S(t) * diffusion * jump
-            currentPrice *= diffusionComponent * jumpComponent
-            prices.add(currentPrice)
-        }
-
-        return prices
-    }
-
-    private fun poissonProcess(lambda: Double): Int {
-        // Generate Poisson-distributed number of jumps
-        if (lambda <= 0.0) return 0
-
-        val L = exp(-lambda)
-        var k = 0
-        var p = 1.0
-
-        do {
-            k++
-            p *= Random.nextDouble()
-        } while (p > L)
-
-        return k - 1
-    }
-
-    private fun generateNormalRandom(): Double {
-        // Box-Muller transformation
-        var u = 0.0
-        var v = 0.0
-
-        while (u == 0.0) u = Random.nextDouble()
-        while (v == 0.0) v = Random.nextDouble()
-
-        return sqrt(-2.0 * ln(u)) * cos(2.0 * PI * v)
-    }
-
-    // Advanced jump detection using Lee-Mykland test
-    private fun leeMylandJumpTest(returns: List<Double>, alpha: Double = 0.01): List<JumpEvent> {
-        if (returns.size < 20) return emptyList()
-
-        val jumpEvents = mutableListOf<JumpEvent>()
-        val window = 20
-
-        for (i in window until returns.size) {
-            // Calculate realized volatility using recent returns
-            val recentReturns = returns.subList(i - window, i)
-            val realizedVar = recentReturns.map { it.pow(2) }.sum()
-            val realizedVol = sqrt(realizedVar)
-
-            // Lee-Mykland test statistic
-            val testStat = abs(returns[i]) / realizedVol
-            val criticalValue = sqrt(2 * ln(1 / alpha))
-
-            val isJump = testStat > criticalValue
-
-            jumpEvents.add(JumpEvent(
-                index = i,
-                jumpSize = if (isJump) returns[i] else 0.0,
-                isJump = isJump
-            ))
-        }
-
-        return jumpEvents
-    }
-
-    // Calibrate Merton model using Maximum Likelihood Estimation (simplified)
-    private fun calibrateMertonModel(returns: List<Double>): MertonParameters {
-        val jumps = detectJumps(returns, 2.5)
-        val jumpReturns = jumps.filter { it.isJump }.map { it.jumpSize }
-
-        // Estimate parameters using method of moments (simplified MLE)
-        val allReturnsMean = returns.average()
-        val allReturnsVar = returns.map { (it - allReturnsMean).pow(2) }.average()
-
-        val jumpFreq = jumpReturns.size.toDouble() / returns.size
-        val annualJumpIntensity = jumpFreq * 252.0
-
-        val jumpMean = if (jumpReturns.isNotEmpty()) jumpReturns.average() else 0.0
-        val jumpVar = if (jumpReturns.size > 1) {
-            jumpReturns.map { (it - jumpMean).pow(2) }.average()
-        } else 0.01
-
-        // Adjust for jump contribution to total variance
-        val jumpContribution = annualJumpIntensity * (jumpMean.pow(2) + jumpVar)
-        val diffusionVar = max(0.01, allReturnsVar - jumpContribution / 252.0)
-
-        return MertonParameters(
-            drift = allReturnsMean * 252.0, // Annualized
-            diffusionVol = sqrt(diffusionVar * 252.0), // Annualized
-            jumpIntensity = annualJumpIntensity,
-            jumpMean = jumpMean,
-            jumpStd = sqrt(jumpVar)
-        )
-    }
-
-    // Calculate option prices using Merton jump-diffusion formula
-    private fun mertonOptionPrice(
-        spot: Double,
-        strike: Double,
-        timeToExpiry: Double,
-        riskFreeRate: Double,
-        params: MertonParameters,
-        isCall: Boolean = true
-    ): Double {
-
-        val maxTerms = 10 // Truncate infinite series
-        var optionPrice = 0.0
-
-        for (n in 0 until maxTerms) {
-            // Poisson probability
-            val poissonProb = exp(-params.jumpIntensity * timeToExpiry) *
-                    (params.jumpIntensity * timeToExpiry).pow(n) / factorial(n)
-
-            // Adjusted parameters for n jumps
-            val adjustedVol = sqrt(params.diffusionVol.pow(2) + n * params.jumpStd.pow(2) / timeToExpiry)
-            val adjustedRate = riskFreeRate - params.jumpIntensity *
-                    (exp(params.jumpMean + 0.5 * params.jumpStd.pow(2)) - 1) +
-                    n * ln(1 + params.jumpMean) / timeToExpiry
-
-            // Black-Scholes price with adjusted parameters
-            val bsPrice = blackScholesPrice(spot, strike, timeToExpiry, adjustedRate, adjustedVol, isCall)
-
-            optionPrice += poissonProb * bsPrice
-        }
-
-        return optionPrice
-    }
-
-    private fun factorial(n: Int): Double {
-        return if (n <= 1) 1.0 else n * factorial(n - 1)
-    }
-
-    private fun blackScholesPrice(
-        spot: Double,
-        strike: Double,
-        timeToExpiry: Double,
-        riskFreeRate: Double,
-        volatility: Double,
-        isCall: Boolean
-    ): Double {
-
-        val d1 = (ln(spot / strike) + (riskFreeRate + 0.5 * volatility.pow(2)) * timeToExpiry) /
-                (volatility * sqrt(timeToExpiry))
-        val d2 = d1 - volatility * sqrt(timeToExpiry)
-
-        return if (isCall) {
-            spot * normalCDF(d1) - strike * exp(-riskFreeRate * timeToExpiry) * normalCDF(d2)
-        } else {
-            strike * exp(-riskFreeRate * timeToExpiry) * normalCDF(-d2) - spot * normalCDF(-d1)
-        }
-    }
-
-    private fun normalCDF(x: Double): Double {
-        return 0.5 * (1.0 + erf(x / sqrt(2.0)))
-    }
-
-    private fun erf(x: Double): Double {
-        // Error function approximation
-        val a1 = 0.254829592
-        val a2 = -0.284496736
-        val a3 = 1.421413741
-        val a4 = -1.453152027
-        val a5 = 1.061405429
-        val p = 0.3275911
-
-        val sign = if (x < 0) -1 else 1
-        val absX = abs(x)
-
-        val t = 1.0 / (1.0 + p * absX)
-        val y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * exp(-absX * absX)
-
-        return sign * y
-    }
-
-    // Jump size distribution analysis
-    private fun analyzeJumpDistribution(jumpEvents: List<JumpEvent>): Map<String, Double> {
-        val jumpSizes = jumpEvents.filter { it.isJump }.map { it.jumpSize }
-
-        if (jumpSizes.isEmpty()) {
-            return mapOf(
-                "jumpFrequency" to 0.0,
-                "averageJumpSize" to 0.0,
-                "jumpVolatility" to 0.0,
-                "positiveJumps" to 0.0,
-                "negativeJumps" to 0.0
-            )
-        }
-
-        val positiveJumps = jumpSizes.filter { it > 0 }
-        val negativeJumps = jumpSizes.filter { it < 0 }
-
-        return mapOf(
-            "jumpFrequency" to jumpSizes.size.toDouble(),
-            "averageJumpSize" to jumpSizes.average(),
-            "jumpVolatility" to sqrt(jumpSizes.map { (it - jumpSizes.average()).pow(2) }.average()),
-            "positiveJumps" to positiveJumps.size.toDouble(),
-            "negativeJumps" to negativeJumps.size.toDouble(),
-            "averagePositiveJump" to if (positiveJumps.isNotEmpty()) positiveJumps.average() else 0.0,
-            "averageNegativeJump" to if (negativeJumps.isNotEmpty()) negativeJumps.average() else 0.0
-        )
+        parameters: JumpDiffusionParameters,
+        upperProb: Double,
+        lowerProb: Double
+    ) {
+        Log.d("JumpDiffusion", "=== FIRST-PASSAGE PROBABILITY CALCULATION ===")
+        Log.d("JumpDiffusion", "Current price: $currentPrice")
+        Log.d("JumpDiffusion", "Upper band: $upperBand, Lower band: $lowerBand")
+        Log.d("JumpDiffusion", "Days ahead: $daysAhead")
+        Log.d("JumpDiffusion", "Parameters:")
+        Log.d("JumpDiffusion", "  Daily drift: ${String.format("%.6f", parameters.diffusionMean)}")
+        Log.d("JumpDiffusion", "  Daily volatility: ${String.format("%.4f", parameters.diffusionVolatility)}")
+        Log.d("JumpDiffusion", "  Daily jump intensity: ${String.format("%.4f", parameters.jumpIntensity)}")
+        Log.d("JumpDiffusion", "  Jump mean: ${String.format("%.4f", parameters.jumpMean)}")
+        Log.d("JumpDiffusion", "  Jump volatility: ${String.format("%.4f", parameters.jumpVolatility)}")
+        Log.d("JumpDiffusion", "Results:")
+        Log.d("JumpDiffusion", "  Upper probability: ${String.format("%.1f", upperProb * 100)}%")
+        Log.d("JumpDiffusion", "  Lower probability: ${String.format("%.1f", lowerProb * 100)}%")
+        Log.d("JumpDiffusion", "=== END DEBUG INFO ===")
     }
 }

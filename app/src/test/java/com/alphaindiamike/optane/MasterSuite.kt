@@ -12,7 +12,10 @@ import org.junit.runners.Suite
     ProbabilisticForecasterTest::class,
     MonteCarloBasicTest::class,
     MonteCarloAdvancedTest::class,
-    QuantileTransformerForecasterTest::class
+    QuantileTransformerForecasterTest::class,
+    TransformerForecasterTest::class,
+    RegimeSwitchingForecasterTest::class,
+    JumpDiffusionForecasterTest::class
 )
 class AlgorithmTestSuite {
     // This class remains empty, it's just a holder for the above annotations

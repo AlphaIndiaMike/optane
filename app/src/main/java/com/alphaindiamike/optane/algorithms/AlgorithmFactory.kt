@@ -6,7 +6,6 @@ import com.alphaindiamike.optane.algorithms.implementations.GARCHForecasterImpl
 import com.alphaindiamike.optane.algorithms.implementations.EnsembleForecasterImpl
 import com.alphaindiamike.optane.algorithms.implementations.QuantileTransformerForecasterImpl
 import com.alphaindiamike.optane.algorithms.implementations.RegimeSwitchingForecasterImpl
-import com.alphaindiamike.optane.algorithms.implementations.MetaEnsembleForecasterImpl
 import com.alphaindiamike.optane.algorithms.implementations.JumpDiffusionForecasterImpl
 import com.alphaindiamike.optane.algorithms.implementations.BlackScholesForecasterImpl
 import com.alphaindiamike.optane.algorithms.implementations.MonteCarloBasicImpl
@@ -21,7 +20,6 @@ enum class AlgorithmType {
     ENSEMBLE_FORECASTER,                // Combined models
     QUANTILE_TRANSFORMER_FORECASTER,    // Research-level
     REGIME_SWITCHING_FORECASTER,        // Markov chains
-    META_ENSEMBLE_FORECASTER,           // Advanced ensemble
     JUMP_DIFFUSION_FORECASTER,          // Merton jump-diffusion model
     BLACK_SCHOLES_FORECASTER,           // European option pricing framework
     MONTE_CARLO_BASIC,                  // Basic Monte Carlo simulation
@@ -37,7 +35,6 @@ class AlgorithmFactory {
             AlgorithmType.ENSEMBLE_FORECASTER -> EnsembleForecasterImpl()
             AlgorithmType.QUANTILE_TRANSFORMER_FORECASTER -> QuantileTransformerForecasterImpl()
             AlgorithmType.REGIME_SWITCHING_FORECASTER -> RegimeSwitchingForecasterImpl()
-            AlgorithmType.META_ENSEMBLE_FORECASTER -> MetaEnsembleForecasterImpl()
             AlgorithmType.JUMP_DIFFUSION_FORECASTER -> JumpDiffusionForecasterImpl()
             AlgorithmType.BLACK_SCHOLES_FORECASTER -> BlackScholesForecasterImpl()
             AlgorithmType.MONTE_CARLO_BASIC -> MonteCarloBasicImpl()
