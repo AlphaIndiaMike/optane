@@ -1,0 +1,17 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_exit"
+        android:title="@string/exit" />
+
+    <item
+        android:id="@+id/action_import"
+        android:title="@string/import_mi" />
+
+    <item
+        android:id="@+id/action_report"
+        android:title="@string/report" />
+
+    <item
+        android:id="@+id/action_update_all"
+        android:title="@string/update_all" />
+</menu>

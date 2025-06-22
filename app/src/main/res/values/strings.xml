@@ -1,0 +1,36 @@
+<resources>
+    <string name="app_name">Optane</string>
+    <string name="action_settings">Settings</string>
+    <!-- Strings used for fragments for navigation -->
+    <string name="first_fragment_label">First Fragment</string>
+    <string name="second_fragment_label">Second Fragment</string>
+    <string name="next">Next</string>
+    <string name="previous">Previous</string>
+    <string name="search_symbol">Search symbol</string>
+    <string name="refresh">Refresh</string>
+    <string name="add_symbol">Add symbol</string>
+    <string name="refresh_symbols">Refresh symbols</string>
+    <string name="add_symbol2">Add symbol</string>
+    <string name="search_symbols">\u2000Search symbols…</string>
+    <string name="add">Add</string>
+    <string name="apple_inc">Apple Inc.</string>
+    <string name="aapl">AAPL</string>
+    <string name="view"><![CDATA[View >]]></string>
+    <string name="calculate_probability">Calculate probability</string>
+    <string name="days_prediction">Days prediction</string>
+    <string name="upper_price_band">Upper price band</string>
+    <string name="lower_price_band">Lower price band</string>
+    <string name="last_update_">Last update: 10.10.2025</string>
+    <string name="asset_title">Asset title</string>
+    <string name="calculation_">Calculation</string>
+    <string name="asset_title_calculation">Asset title calculation</string>
+    <string name="symbol_id">Symbol ID</string>
+    <string name="symbol_name">Symbol Name</string>
+    <string name="no_symbols">No symbols added yet.\nTap + to add your first symbol.</string>
+    <string name="delete">delete</string>
+    <string name="exit">Exit</string>
+    <string name="import_mi">Import</string>
+    <string name="report">Report</string>
+    <string name="update_all">Update all</string>
+    <string name="preparing_msg">Preparing...</string>
+</resources>
