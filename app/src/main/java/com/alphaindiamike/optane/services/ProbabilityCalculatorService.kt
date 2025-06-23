@@ -283,42 +283,42 @@ class ProbabilityCalculatorService: Service() {
             timeSeries = input
         );
 
-        broadcastProgress(10,1,10,"Regime Switching Forecaster");
+        broadcastProgress(10,1,9,"Regime Switching Forecaster");
         val reportRSF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.REGIME_SWITCHING_FORECASTER)
             .calculate(calcParam)
-        broadcastProgress(20,2,10,"Monte Carlo Basic");
+        broadcastProgress(20,2,9,"Monte Carlo Basic");
         val reportMCB = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.MONTE_CARLO_BASIC)
             .calculate(calcParam)
-        broadcastProgress(30,3,10,"Monte Carlo Advanced");
+        broadcastProgress(30,3,9,"Monte Carlo Advanced");
         val reportMCA = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.MONTE_CARLO_ADVANCED)
             .calculate(calcParam)
-        broadcastProgress(40,4,10,"Probabilistic Forecaster");
+        broadcastProgress(40,4,9,"Probabilistic Forecaster");
         val reportPFB = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.PROBABILISTIC_FORECASTER)
             .calculate(calcParam)
-        broadcastProgress(50,5,10,"Quantile Transformer Forecaster");
+        broadcastProgress(50,5,9,"Quantile Transformer Forecaster");
         val reportQTF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.QUANTILE_TRANSFORMER_FORECASTER)
             .calculate(calcParam)
-        broadcastProgress(60,6,10,"Transformer Forecaster");
+        broadcastProgress(60,6,9,"Transformer Forecaster");
         val reportTF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.TRANSFORMER_FORECASTER)
             .calculate(calcParam)
-        broadcastProgress(70,7,10,"Jump Diffusion Forecaster");
+        broadcastProgress(70,7,9,"Jump Diffusion Forecaster");
         val reportJDF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.JUMP_DIFFUSION_FORECASTER)
             .calculate(calcParam)
-        broadcastProgress(80,8,10,"GARCH Forecaster");
+        broadcastProgress(80,8,9,"GARCH Forecaster");
         val reportGF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.GARCH_FORECASTER)
-            .calculate(calcParam)//TODO
-        broadcastProgress(95,10,11,"BLACK and SCHOLES Forecaster");
+            .calculate(calcParam)
+        broadcastProgress(90,9,9,"BS Forecaster");
         val reportBSF = AlgorithmFactory()
             .createAlgorithm(AlgorithmType.BLACK_SCHOLES_FORECASTER)
-            .calculate(calcParam)//TODO
+            .calculate(calcParam)
         return """
 Asset Analysis Report
 =====================

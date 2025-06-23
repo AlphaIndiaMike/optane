@@ -300,6 +300,7 @@ class JumpDiffusionForecasterImpl(private val enableDebugLogging: Boolean = fals
     /**
      * Correct first-passage probability formula for GBM
      */
+    /*
     private fun calculateFirstPassageGBM(
         startPrice: Double,
         barrier: Double,
@@ -347,6 +348,49 @@ class JumpDiffusionForecasterImpl(private val enableDebugLogging: Boolean = fals
         }
 
         return minOf(1.0, maxOf(0.0, prob1 + prob2))
+    }*/
+
+    private fun calculateFirstPassageGBM(
+        startPrice: Double,
+        barrier: Double,
+        drift: Double,
+        volatility: Double,
+        timeHorizon: Double,
+        isUpper: Boolean
+    ): Double {
+
+        // Check if already past barrier
+        if ((isUpper && startPrice >= barrier) || (!isUpper && startPrice <= barrier)) {
+            return 1.0
+        }
+
+        val numSimulations = 5000
+        var touchCount = 0
+        val numSteps = timeHorizon.toInt()
+
+        repeat(numSimulations) {
+            var currentPrice = startPrice
+            var touched = false
+
+            for (step in 1..numSteps) {
+                // Generate random normal
+                val random = generateNormalRandom()
+
+                // Update price using GBM with jump-diffusion parameters
+                val priceChange = drift + volatility * random
+                currentPrice *= exp(priceChange)
+
+                // Check if barrier touched
+                if ((isUpper && currentPrice >= barrier) || (!isUpper && currentPrice <= barrier)) {
+                    touched = true
+                    break
+                }
+            }
+
+            if (touched) touchCount++
+        }
+
+        return touchCount.toDouble() / numSimulations
     }
 
     private fun normalCDF(x: Double): Double {

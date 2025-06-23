@@ -4,33 +4,18 @@ import kotlin.math.*
 import com.alphaindiamike.optane.database.entities.TimeSeriesEntity
 import com.alphaindiamike.optane.algorithms.AlgorithmRepository
 import com.alphaindiamike.optane.model.Calculations
+import android.util.Log
 
 /**
- * Black-Scholes Based Calculator
- * European-style option pricing framework for probability calculation
- *
- *         // 1. calculateImpliedVolatility() or use historical volatility
- *         // 2. normalCDF() - Cumulative normal distribution
- *         // 3. erf() - Error function for normal CDF
- *         // 4. calculateD1D2() - Black-Scholes d1 and d2 parameters
- *         // 5. calculateProbability() - Risk-neutral probability of reaching targets
+ * Black-Scholes Forecaster - Fixed Implementation
+ * Uses Black-Scholes framework for volatility estimation with Monte Carlo for barrier touching probabilities
  */
-class BlackScholesForecasterImpl : AlgorithmRepository {
+class BlackScholesForecasterImpl(private val enableDebugLogging: Boolean = true) : AlgorithmRepository {
 
-    // Black-Scholes parameters
     private data class BSParams(
-        val riskFreeRate: Double = 0.02,  // 2%
+        val riskFreeRate: Double = 0.025,  // ECB rate approximation
         val dividendYield: Double = 0.0,
         val volatility: Double
-    )
-
-    private data class BSResult(
-        val d1: Double,
-        val d2: Double,
-        val callPrice: Double,
-        val putPrice: Double,
-        val callDelta: Double,
-        val putDelta: Double
     )
 
     private data class ProbabilityAnalysis(
@@ -47,45 +32,65 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
         val daysAhead = calculations.daysPrediction
 
         // Validate input
-        if (timeSeries.size < 5) {
-            return "upperBandProbability:0.0,lowerBandProbability:0.0"
+        if (timeSeries.size < 10) {
+            return "Insufficient data"
         }
 
-        // 1. Calculate or estimate implied volatility from historical data
-        val historicalVolatility = calculateHistoricalVolatility(timeSeries)
-        val impliedVolatility = estimateImpliedVolatility(timeSeries, historicalVolatility)
+        if (upperBand <= 0 || lowerBand <= 0) {
+            return "Invalid price bands"
+        }
 
-        // 2. Set up Black-Scholes parameters
-        val bsParams = BSParams(
-            riskFreeRate = 0.025, // ECB rate approximation
-            dividendYield = 0.0,   // Assuming no dividends
-            volatility = impliedVolatility
-        )
+        if (upperBand <= lowerBand) {
+            return "Upper band must be greater than lower band"
+        }
 
-        // 3. Calculate probabilities using risk-neutral framework
-        val currentPrice = timeSeries.last().price
-        val timeToExpiry = daysAhead / 252.0 // Convert trading days to years
+        try {
+            // 1. Calculate historical volatility
+            val historicalVolatility = calculateHistoricalVolatility(timeSeries)
 
-        val upperProbability = calculateRiskNeutralProbability(
-            currentPrice = currentPrice,
-            targetPrice = upperBand,
-            timeToExpiry = timeToExpiry,
-            bsParams = bsParams,
-            isUpperBand = true
-        )
+            // 2. Estimate implied volatility (blend historical with recent)
+            val impliedVolatility = estimateImpliedVolatility(timeSeries, historicalVolatility)
 
-        val lowerProbability = calculateRiskNeutralProbability(
-            currentPrice = currentPrice,
-            targetPrice = lowerBand,
-            timeToExpiry = timeToExpiry,
-            bsParams = bsParams,
-            isUpperBand = false
-        )
+            // 3. Set up Black-Scholes parameters
+            val bsParams = BSParams(
+                riskFreeRate = 0.02, // ECB rate approximation
+                dividendYield = 0.0,   // Assuming no dividends
+                volatility = impliedVolatility
+            )
 
-        return """
-            Upper band of ${upperBand.toString()} probability: ${String.format("%.1f", upperProbability)}%
-            Lower band of ${lowerBand.toString()} probability: ${String.format("%.1f", lowerProbability)}%
-            """.trimIndent()
+            // 4. Calculate barrier touching probabilities using Monte Carlo with BS parameters
+            val currentPrice = timeSeries.last().price
+            val timeToExpiry = daysAhead / 252.0 // Convert trading days to years
+
+            val upperProbability = calculateBarrierTouchingProbability(
+                currentPrice = currentPrice,
+                barrier = upperBand,
+                timeToExpiry = timeToExpiry,
+                bsParams = bsParams,
+                isUpper = true
+            )
+
+            val lowerProbability = calculateBarrierTouchingProbability(
+                currentPrice = currentPrice,
+                barrier = lowerBand,
+                timeToExpiry = timeToExpiry,
+                bsParams = bsParams,
+                isUpper = false
+            )
+
+            if (enableDebugLogging) {
+                logDebugInfo(currentPrice, upperBand, lowerBand, daysAhead, bsParams, upperProbability, lowerProbability)
+            }
+
+            return """
+                Upper band of ${upperBand} probability: ${String.format("%.1f", upperProbability * 100)}%
+                Lower band of ${lowerBand} probability: ${String.format("%.1f", lowerProbability * 100)}%
+                """.trimIndent()
+
+        } catch (e: Exception) {
+            Log.e("BlackScholes", "Error in calculation: ${e.message}")
+            return "Calculation error: ${e.message}"
+        }
     }
 
     private fun calculateHistoricalVolatility(timeSeries: List<TimeSeriesEntity>): Double {
@@ -94,8 +99,12 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
         val returns = mutableListOf<Double>()
         for (i in 1 until timeSeries.size) {
             val ret = ln(timeSeries[i].price / timeSeries[i-1].price)
-            returns.add(ret)
+            if (ret.isFinite()) {
+                returns.add(ret)
+            }
         }
+
+        if (returns.size < 2) return 0.20
 
         val mean = returns.average()
         val variance = returns.map { (it - mean).pow(2) }.sum() / (returns.size - 1)
@@ -103,29 +112,88 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
     }
 
     private fun estimateImpliedVolatility(timeSeries: List<TimeSeriesEntity>, historicalVol: Double): Double {
-        // In practice, this would use market option prices to back out implied vol
-        // For now, we'll adjust historical volatility based on recent price behavior
-
         if (timeSeries.size < 10) return historicalVol
 
-        // Calculate recent volatility (last 5 days)
-        val recentPrices = timeSeries.takeLast(6)
+        // Calculate recent volatility (last 10 days for better estimate)
+        val recentPrices = timeSeries.takeLast(min(10, timeSeries.size))
         val recentReturns = mutableListOf<Double>()
 
         for (i in 1 until recentPrices.size) {
             val ret = ln(recentPrices[i].price / recentPrices[i-1].price)
-            recentReturns.add(ret)
+            if (ret.isFinite()) {
+                recentReturns.add(ret)
+            }
         }
+
+        if (recentReturns.size < 2) return historicalVol
 
         val recentMean = recentReturns.average()
         val recentVariance = recentReturns.map { (it - recentMean).pow(2) }.average()
         val recentVol = sqrt(recentVariance * 252)
 
-        // Blend historical and recent volatility (80% historical, 20% recent to reduce noise)
-        return historicalVol * 0.8 + recentVol * 0.2
+        // Blend historical and recent volatility (70% historical, 30% recent)
+        val blendedVol = historicalVol * 0.7 + recentVol * 0.3
+
+        // Constrain volatility to reasonable range
+        return maxOf(0.05, minOf(2.0, blendedVol))
     }
 
-    private fun calculateRiskNeutralProbability(
+    /**
+     * Calculate barrier touching probability using Monte Carlo simulation
+     * with Black-Scholes risk-neutral dynamics
+     */
+    private fun calculateBarrierTouchingProbability(
+        currentPrice: Double,
+        barrier: Double,
+        timeToExpiry: Double,
+        bsParams: BSParams,
+        isUpper: Boolean
+    ): Double {
+
+        // Check if already past barrier
+        if ((isUpper && currentPrice >= barrier) || (!isUpper && currentPrice <= barrier)) {
+            return 1.0
+        }
+
+        if (timeToExpiry <= 0.0) return 0.0
+
+        val numSimulations = 5000
+        var touchCount = 0
+        val numSteps = maxOf(1, (timeToExpiry * 252).toInt()) // Daily steps
+        val dt = timeToExpiry / numSteps
+
+        // Risk-neutral drift
+        val drift = bsParams.riskFreeRate - bsParams.dividendYield - 0.5 * bsParams.volatility.pow(2)
+
+        repeat(numSimulations) {
+            var price = currentPrice
+            var touched = false
+
+            repeat(numSteps) {
+                if (!touched) {  // Only continue if not already touched
+                    val random = generateNormalRandom()
+
+                    // Risk-neutral price evolution: dS = (r-q)S*dt + σS*dW
+                    val priceChange = drift * dt + bsParams.volatility * sqrt(dt) * random
+                    price *= exp(priceChange)
+
+                    // Check if barrier touched
+                    if ((isUpper && price >= barrier) || (!isUpper && price <= barrier)) {
+                        touched = true
+                    }
+                }
+            }
+
+            if (touched) touchCount++
+        }
+
+        return touchCount.toDouble() / numSimulations
+    }
+
+    /**
+     * Calculate endpoint probability using analytical Black-Scholes (for comparison)
+     */
+    private fun calculateEndpointProbability(
         currentPrice: Double,
         targetPrice: Double,
         timeToExpiry: Double,
@@ -133,10 +201,7 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
         isUpperBand: Boolean
     ): Double {
 
-        // For barrier/target probabilities, we need different calculation than option pricing
-        // This calculates P(S_T >= K) or P(S_T <= K) at expiration
-
-        val drift = bsParams.riskFreeRate - 0.5 * bsParams.volatility.pow(2)
+        val drift = bsParams.riskFreeRate - bsParams.dividendYield - 0.5 * bsParams.volatility.pow(2)
         val logReturn = ln(targetPrice / currentPrice)
         val normalizedReturn = (logReturn - drift * timeToExpiry) / (bsParams.volatility * sqrt(timeToExpiry))
 
@@ -148,7 +213,7 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
             normalCDF(normalizedReturn)
         }
 
-        return probability * 100.0 // Convert to percentage
+        return probability
     }
 
     private fun calculateD1D2(
@@ -169,29 +234,34 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
     }
 
     private fun normalCDF(x: Double): Double {
-        // Cumulative normal distribution using error function
-        return 0.5 * (1.0 + erf(x / sqrt(2.0)))
-    }
+        if (x < -6.0) return 0.0
+        if (x > 6.0) return 1.0
 
-    private fun erf(x: Double): Double {
-        // Error function approximation (same high-precision version from your JS)
-        val a1 = 0.254829592
-        val a2 = -0.284496736
-        val a3 = 1.421413741
-        val a4 = -1.453152027
-        val a5 = 1.061405429
-        val p = 0.3275911
+        // Abramowitz and Stegun approximation
+        val b1 = 0.319381530
+        val b2 = -0.356563782
+        val b3 = 1.781477937
+        val b4 = -1.821255978
+        val b5 = 1.330274429
+        val p = 0.2316419
+        val c = 0.39894228
 
-        val sign = if (x < 0) -1 else 1
         val absX = abs(x)
-
         val t = 1.0 / (1.0 + p * absX)
-        val y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * exp(-absX * absX)
+        val phi = c * exp(-0.5 * absX * absX) * t * (b1 + t * (b2 + t * (b3 + t * (b4 + t * b5))))
 
-        return sign * y
+        return if (x >= 0.0) 1.0 - phi else phi
     }
 
-    // Complete Black-Scholes option pricing
+    private fun generateNormalRandom(): Double {
+        val u1 = kotlin.random.Random.Default.nextDouble()
+        val u2 = kotlin.random.Random.Default.nextDouble()
+        return sqrt(-2.0 * ln(u1)) * cos(2.0 * PI * u2)
+    }
+
+    /**
+     * Complete Black-Scholes option pricing (for reference)
+     */
     private fun blackScholesPrice(
         spot: Double,
         strike: Double,
@@ -212,7 +282,9 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
         }
     }
 
-    // Calculate the Greeks for risk management
+    /**
+     * Calculate the Greeks for risk management
+     */
     private fun calculateGreeks(
         spot: Double,
         strike: Double,
@@ -240,188 +312,19 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
         // Vega: sensitivity to volatility
         val vega = spot * sqrt(timeToExpiry) * (1.0 / sqrt(2 * PI)) * exp(-0.5 * d1.pow(2))
 
-        // Rho: sensitivity to interest rate
-        val callRho = strike * timeToExpiry * exp(-riskFreeRate * timeToExpiry) * normalCDF(d2)
-        val putRho = -strike * timeToExpiry * exp(-riskFreeRate * timeToExpiry) * normalCDF(-d2)
-
         return mapOf(
             "callDelta" to callDelta,
             "putDelta" to putDelta,
             "gamma" to gamma,
             "callTheta" to callTheta / 365.0, // Daily theta
             "putTheta" to putTheta / 365.0,   // Daily theta
-            "vega" to vega / 100.0,           // Vega per 1% vol change
-            "callRho" to callRho / 100.0,     // Rho per 1% rate change
-            "putRho" to putRho / 100.0
+            "vega" to vega / 100.0           // Vega per 1% vol change
         )
     }
 
-    // Implied volatility calculation using Newton-Raphson method
-    private fun calculateImpliedVolatility(
-        marketPrice: Double,
-        spot: Double,
-        strike: Double,
-        timeToExpiry: Double,
-        riskFreeRate: Double,
-        isCall: Boolean = true,
-        tolerance: Double = 1e-6,
-        maxIterations: Int = 100
-    ): Double {
-
-        var vol = 0.20 // Initial guess: 20% volatility
-
-        for (iteration in 0 until maxIterations) {
-            val price = blackScholesPrice(spot, strike, timeToExpiry, riskFreeRate, vol, isCall)
-            val priceDiff = price - marketPrice
-
-            if (abs(priceDiff) < tolerance) {
-                return vol
-            }
-
-            // Calculate vega for Newton-Raphson step
-            val vega = spot * sqrt(timeToExpiry) * (1.0 / sqrt(2 * PI)) *
-                    exp(-0.5 * ((ln(spot / strike) + (riskFreeRate + 0.5 * vol.pow(2)) * timeToExpiry) /
-                            (vol * sqrt(timeToExpiry))).pow(2))
-
-            if (abs(vega) < 1e-10) return vol // Return current vol if vega too small
-
-            // Newton-Raphson update
-            vol = vol - priceDiff / vega
-
-            // Keep volatility in reasonable bounds
-            vol = maxOf(0.001, minOf(5.0, vol))
-        }
-
-        return vol
-    }
-
-    // Risk-neutral vs Physical probability comparison
-    private fun compareRiskNeutralVsPhysical(
-        currentPrice: Double,
-        targetPrice: Double,
-        timeToExpiry: Double,
-        riskFreeRate: Double,
-        volatility: Double,
-        expectedReturn: Double // Physical/statistical expected return
-    ): ProbabilityAnalysis {
-
-        // Risk-neutral probability (using risk-free rate)
-        val d2RiskNeutral = (ln(currentPrice / targetPrice) +
-                (riskFreeRate - 0.5 * volatility.pow(2)) * timeToExpiry) /
-                (volatility * sqrt(timeToExpiry))
-        val riskNeutralProb = if (targetPrice > currentPrice) {
-            1.0 - normalCDF(d2RiskNeutral)
-        } else {
-            normalCDF(d2RiskNeutral)
-        }
-
-        // Physical probability (using actual expected return)
-        val d2Physical = (ln(currentPrice / targetPrice) +
-                (expectedReturn - 0.5 * volatility.pow(2)) * timeToExpiry) /
-                (volatility * sqrt(timeToExpiry))
-        val physicalProb = if (targetPrice > currentPrice) {
-            1.0 - normalCDF(d2Physical)
-        } else {
-            normalCDF(d2Physical)
-        }
-
-        return ProbabilityAnalysis(
-            riskNeutralProbability = riskNeutralProb * 100,
-            physicalProbability = physicalProb * 100,
-            impliedVolatility = volatility * 100,
-            timeDecay = abs(riskNeutralProb - physicalProb) * 100
-        )
-    }
-
-    // Volatility smile modeling (simplified)
-    private fun calculateVolatilitySmile(
-        spot: Double,
-        timeToExpiry: Double,
-        riskFreeRate: Double,
-        strikes: List<Double>
-    ): Map<Double, Double> {
-
-        val atmVolatility = 0.20 // At-the-money volatility
-        val smileParameters = mapOf(
-            "skew" to -0.02,    // Volatility skew
-            "convexity" to 0.001 // Volatility convexity
-        )
-
-        return strikes.associateWith { strike ->
-            val moneyness = ln(strike / spot)
-            val skewAdjustment = smileParameters["skew"]!! * moneyness
-            val convexityAdjustment = smileParameters["convexity"]!! * moneyness.pow(2)
-
-            atmVolatility + skewAdjustment + convexityAdjustment
-        }
-    }
-
-    // Monte Carlo validation of Black-Scholes probabilities
-    private fun validateWithMonteCarlo(
-        currentPrice: Double,
-        targetPrice: Double,
-        timeToExpiry: Double,
-        riskFreeRate: Double,
-        volatility: Double,
-        numSimulations: Int = 10000
-    ): Double {
-
-        var reachesTarget = 0
-        val dt = timeToExpiry / 252.0 // Daily time steps
-        val numSteps = (timeToExpiry * 252).toInt()
-
-        repeat(numSimulations) {
-            var price = currentPrice
-            var maxPrice = currentPrice
-            var minPrice = currentPrice
-
-            repeat(numSteps) {
-                val random = generateNormalRandom()
-                val priceChange = exp((riskFreeRate - 0.5 * volatility.pow(2)) * dt +
-                        volatility * sqrt(dt) * random)
-                price *= priceChange
-                maxPrice = maxOf(maxPrice, price)
-                minPrice = minOf(minPrice, price)
-            }
-
-            // Check if target was reached during the path
-            if (targetPrice > currentPrice && maxPrice >= targetPrice) {
-                reachesTarget++
-            } else if (targetPrice < currentPrice && minPrice <= targetPrice) {
-                reachesTarget++
-            }
-        }
-
-        return (reachesTarget.toDouble() / numSimulations) * 100.0
-    }
-
-    private fun generateNormalRandom(): Double {
-        // Box-Muller transformation
-        var u = 0.0
-        var v = 0.0
-
-        while (u == 0.0) u = kotlin.random.Random.nextDouble()
-        while (v == 0.0) v = kotlin.random.Random.nextDouble()
-
-        return sqrt(-2.0 * ln(u)) * cos(2.0 * PI * v)
-    }
-
-    // Term structure of volatility
-    private fun calculateVolatilityTermStructure(
-        timeSeries: List<TimeSeriesEntity>,
-        maturities: List<Double> = listOf(7.0/365, 30.0/365, 90.0/365, 180.0/365, 365.0/365)
-    ): Map<Double, Double> {
-
-        val baseVolatility = calculateHistoricalVolatility(timeSeries)
-
-        return maturities.associateWith { maturity ->
-            // Simple term structure model: vol decreases with maturity
-            val termStructureAdjustment = 1.0 + 0.1 * exp(-maturity * 2.0)
-            baseVolatility * termStructureAdjustment
-        }
-    }
-
-    // Risk metrics based on Black-Scholes framework
+    /**
+     * Risk metrics based on Black-Scholes framework
+     */
     private fun calculateRiskMetrics(
         currentPrice: Double,
         volatility: Double,
@@ -437,7 +340,7 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
         val varPrice = currentPrice * exp(logReturn)
         val var_ = currentPrice - varPrice
 
-        // Expected shortfall
+        // Expected shortfall approximation
         val phi = (1.0 / sqrt(2 * PI)) * exp(-0.5 * zScore.pow(2))
         val expectedShortfall = currentPrice * (1 - exp(expectedReturn * timeToExpiry -
                 volatility * sqrt(timeToExpiry) * phi / confidenceLevel))
@@ -451,7 +354,6 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
     }
 
     private fun inverseNormalCDF(p: Double): Double {
-        // Beasley-Springer-Moro algorithm (from your JS code)
         if (p == 0.5) return 0.0
 
         val a = doubleArrayOf(0.0, -3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
@@ -468,6 +370,29 @@ class BlackScholesForecasterImpl : AlgorithmRepository {
             (((((a[1] * q + a[2]) * q + a[3]) * q + a[4]) * q + a[5]) * q + a[6]) /
                     ((((b[1] * q + b[2]) * q + b[3]) * q + b[4]) * q + 1)
         }
+    }
+
+    private fun logDebugInfo(
+        currentPrice: Double,
+        upperBand: Double,
+        lowerBand: Double,
+        daysAhead: Int,
+        bsParams: BSParams,
+        upperProb: Double,
+        lowerProb: Double
+    ) {
+        Log.d("BlackScholes", "=== BLACK-SCHOLES FORECASTER DEBUG INFO ===")
+        Log.d("BlackScholes", "Current price: $currentPrice")
+        Log.d("BlackScholes", "Upper band: $upperBand, Lower band: $lowerBand")
+        Log.d("BlackScholes", "Days ahead: $daysAhead")
+        Log.d("BlackScholes", "Black-Scholes Parameters:")
+        Log.d("BlackScholes", "  Risk-free rate: ${String.format("%.3f", bsParams.riskFreeRate * 100)}%")
+        Log.d("BlackScholes", "  Dividend yield: ${String.format("%.3f", bsParams.dividendYield * 100)}%")
+        Log.d("BlackScholes", "  Volatility: ${String.format("%.1f", bsParams.volatility * 100)}%")
+        Log.d("BlackScholes", "Results:")
+        Log.d("BlackScholes", "  Upper probability: ${String.format("%.1f", upperProb * 100)}%")
+        Log.d("BlackScholes", "  Lower probability: ${String.format("%.1f", lowerProb * 100)}%")
+        Log.d("BlackScholes", "=== END DEBUG INFO ===")
     }
 }
 
