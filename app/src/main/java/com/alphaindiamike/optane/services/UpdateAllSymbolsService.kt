@@ -167,7 +167,7 @@ class UpdateAllSymbolsService : Service() {
                     Dispatchers.IO,
                     // Suspend function block
                     block = {
-                        networkRepository.downloadLsTcSingleAssetData(symbolId)
+                        networkRepository.fetchNetworkData(symbolId)
                     }
                 )
 

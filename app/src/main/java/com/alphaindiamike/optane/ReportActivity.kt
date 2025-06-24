@@ -33,6 +33,8 @@ class ReportActivity : OptaneActivityBase<ActivityReportBinding>() {
     private var upperBand : Double = 0.0;
     private var days : Int = 0;
     private var fkId : Long = 0L;
+    private var lastPrice : Double = 0.0;
+    private var timeframeMonths: Int = -1 // -1 means "All data"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,6 +60,9 @@ class ReportActivity : OptaneActivityBase<ActivityReportBinding>() {
         } catch (e: NumberFormatException) {
             fkId = 0L
         }
+        lastPrice = intent.getDoubleExtra("last_price", 0.0)
+        timeframeMonths = intent.getIntExtra("timeframe_months", -1)
+
     }
 
     private fun setupDatabase() {
@@ -92,6 +97,8 @@ class ReportActivity : OptaneActivityBase<ActivityReportBinding>() {
                 intent.putExtra("lower_band", lowerBand)
                 intent.putExtra("upper_band", upperBand)
                 intent.putExtra("days", days)
+                intent.putExtra("last_price",lastPrice)
+                intent.putExtra("timeframe_months", timeframeMonths)
                 Log.d("Activity", "About to start service with action: ${intent.action}")
                 startService(intent)
                 Log.d("Activity", "startService() called")

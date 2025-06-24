@@ -37,6 +37,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 import android.content.Context
 import android.content.res.Configuration
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import com.github.mikephil.charting.highlight.Highlight
 import com.github.mikephil.charting.components.MarkerView
 import com.github.mikephil.charting.utils.MPPointF
@@ -54,6 +56,11 @@ class SymbolActivity : AppCompatActivity() {
     private lateinit var fabRefresh: FloatingActionButton
     private lateinit var fabDelete: FloatingActionButton
 
+    // ==========================================
+    private lateinit var spinnerTimeframe: AutoCompleteTextView
+    private var selectedTimeframeMonths: Int = -1 // -1 means "All data"
+    // ==========================================
+
     private var symbolName: String = ""
     private var symbolId: String = ""
     private var fkId: Long = 0L
@@ -65,6 +72,9 @@ class SymbolActivity : AppCompatActivity() {
         setupDatabase()
         getIntentData()
         setupViews()
+        // ==========================================
+        setupTimeframeDropdown()
+        // ==========================================
         setupClickListeners()
         updateUI()
         setupChart()
@@ -96,7 +106,41 @@ class SymbolActivity : AppCompatActivity() {
         lineChart = findViewById(R.id.lineChart)
         fabRefresh = findViewById(R.id.fabRefresh)
         fabDelete = findViewById(R.id.fabDelete)
+        // ==========================================
+        spinnerTimeframe = findViewById(R.id.spinnerTimeframe)
+        // ==========================================
     }
+
+    // ==========================================
+    private fun setupTimeframeDropdown() {
+        // Define timeframe options with their corresponding months
+        val timeframeOptions = arrayOf(
+            getString(R.string.three_months_recent_patterns),
+            getString(R.string.six_months_balanced),
+            getString(R.string.one_year_business_cycle),
+            getString(R.string.two_years_extended_history),
+            getString(R.string.all_data_full_dataset)
+        )
+
+        // Map timeframe options to months (-1 for "All data")
+        val timeframeMonths = arrayOf(3, 6, 12, 24, -1)
+
+        // Create adapter for dropdown
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, timeframeOptions)
+        spinnerTimeframe.setAdapter(adapter)
+
+        // Set default selection to "All data (full dataset)"
+        spinnerTimeframe.setText(timeframeOptions[4], false) // Index 4 = "All data"
+        selectedTimeframeMonths = -1
+
+        // Handle selection changes
+        spinnerTimeframe.setOnItemClickListener { _, _, position, _ ->
+            selectedTimeframeMonths = timeframeMonths[position]
+            // Refresh chart when timeframe changes
+            loadChartData()
+        }
+    }
+    // ==========================================
 
     private fun setupClickListeners() {
         btnCalculateProbability.setOnClickListener {
@@ -127,7 +171,7 @@ class SymbolActivity : AppCompatActivity() {
                     Dispatchers.IO,
                     // Suspend function block
                     block = {
-                        networkRepository.downloadLsTcSingleAssetData(symbolId)
+                        networkRepository.fetchNetworkData(symbolId)
                     }
                 )
 
@@ -280,11 +324,21 @@ class SymbolActivity : AppCompatActivity() {
                     Dispatchers.IO,
                     //Suspend function
                     block = {
-                        repositoryDatabaseLink.getTimeSeriesForAsset(fkId).sortedBy(
-                            selector =
-                                // Selector function
-                                { it.date }
-                        )
+                        // ==========================================
+                        val allData = repositoryDatabaseLink.getTimeSeriesForAsset(fkId).sortedBy { it.date }
+
+                        if (selectedTimeframeMonths == -1) {
+                            // Return all data
+                            allData
+                        } else {
+                            // Filter data based on selected timeframe
+                            val currentTime = System.currentTimeMillis() * 1_000_000L // Convert ms to ns
+                            val nanosecondsInMonth = 30L * 24L * 60L * 60L * 1_000_000_000L // Approximate month in nanoseconds
+                            val cutoffTime = currentTime - (selectedTimeframeMonths * nanosecondsInMonth)
+
+                            allData.filter { it.date >= cutoffTime }
+                        }
+                        // ==========================================
                     }
                 )
 
@@ -383,6 +437,7 @@ class SymbolActivity : AppCompatActivity() {
         textLastUpdate.text = lastUpdateText
     }
 
+    var lastPrice: Double = 0.0
 
     @SuppressLint("SetTextI18n")
     private fun updateUI() {
@@ -398,6 +453,7 @@ class SymbolActivity : AppCompatActivity() {
                     }
                 )
                 textAssetTitle.text = "Asset title: $symbolName (Last price: ${String.format("%.2f", timeSeriesLastDp.price)} EUR) "
+                lastPrice = timeSeriesLastDp.price
             } catch (e: Exception) {
                 textAssetTitle.text = "Asset title: $symbolName (never updated)"
             }
@@ -414,6 +470,42 @@ class SymbolActivity : AppCompatActivity() {
         val upperBand = editUpperPriceBand.text.toString().toDoubleOrNull() ?: 0.0
         val days = editDaysPrediction.text.toString().toIntOrNull() ?: 0
 
+        // ==========================================
+        var hasErrors = false
+        var errorMessage = "Please complete the following fields:\n"
+
+        if (lowerBand <= 0) {
+            errorMessage += "• Lower price band must be greater than 0\n"
+            hasErrors = true
+        }
+
+        if (upperBand <= 0) {
+            errorMessage += "• Upper price band must be greater than 0\n"
+            hasErrors = true
+        }
+
+        if (days <= 0) {
+            errorMessage += "• Days prediction must be greater than 0\n"
+            hasErrors = true
+        }
+
+        if (lowerBand > 0 && upperBand > 0 && lowerBand >= upperBand) {
+            errorMessage += "• Lower price band must be less than upper price band\n"
+            hasErrors = true
+        }
+
+        if (hasErrors) {
+            // Show error dialog
+            AlertDialog.Builder(this)
+                .setTitle("Invalid Input")
+                .setMessage(errorMessage.trim())
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        // ==========================================
+
         if (lowerBand > 0 && upperBand > 0 && days > 0) {
             // Navigate to ReportActivity with calculation data
             val intent = Intent(this, ReportActivity::class.java)
@@ -423,6 +515,10 @@ class SymbolActivity : AppCompatActivity() {
             intent.putExtra("lower_band", lowerBand)
             intent.putExtra("upper_band", upperBand)
             intent.putExtra("days", days)
+            // ==========================================
+            intent.putExtra("timeframe_months", selectedTimeframeMonths)
+            intent.putExtra("last_price", lastPrice)
+            // ==========================================
             startActivity(intent)
         }
     }

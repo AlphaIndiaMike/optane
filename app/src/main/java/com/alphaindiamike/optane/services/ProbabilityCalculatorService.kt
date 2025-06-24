@@ -1,6 +1,6 @@
 package com.alphaindiamike.optane.services
 
-import android.app.AlertDialog
+import com.alphaindiamike.optane.R
 import android.app.Service
 import android.content.Intent
 import android.os.Binder
@@ -34,6 +34,9 @@ class ProbabilityCalculatorService: Service() {
     private var upperBand : Double = 0.0;
     private var days : Int = 0;
     private var fkId : Long = 0L;
+    private var lastPrice : Double = 0.0;
+    private var timeframeMonths: Int = -1 // -1 means "All data"
+    private var inputSize: String = "not set"
 
     companion object {
         const val ACTION_START_CALCULATION = "START_CALCULATION"
@@ -63,6 +66,20 @@ class ProbabilityCalculatorService: Service() {
             intent.getLongExtra("fk_id", 0L)
         } catch (e: NumberFormatException) {
             0L
+        }
+        lastPrice = intent.getDoubleExtra("last_price", 0.0)
+        timeframeMonths = intent.getIntExtra("timeframe_months", -1)
+        setDropdownSelection(timeframeMonths)
+    }
+
+    private fun setDropdownSelection(timeframeMonths: Int) {
+        inputSize = when (timeframeMonths) {
+            3 -> getString(R.string.three_months_recent_patterns)
+            6 -> getString(R.string.six_months_balanced)
+            12 -> getString(R.string.one_year_business_cycle)
+            24 -> getString(R.string.two_years_extended_history)
+            -1 -> getString(R.string.all_data_full_dataset)
+            else -> getString(R.string.all_data_full_dataset) // Default
         }
     }
 
@@ -244,11 +261,19 @@ class ProbabilityCalculatorService: Service() {
                         Dispatchers.IO,
                         //Suspend function
                         block = {
-                            repository.getTimeSeriesForAsset(fkId).sortedBy(
-                                selector =
-                                    // Selector function
-                                    { it.date }
-                            )
+                            val allData = repository.getTimeSeriesForAsset(fkId).sortedBy { it.date }
+
+                            if (timeframeMonths == -1) {
+                                // Return all data
+                                allData
+                            } else {
+                                // Filter data based on selected timeframe
+                                val currentTime = System.currentTimeMillis() * 1_000_000L // Convert ms to ns
+                                val nanosecondsInMonth = 30L * 24L * 60L * 60L * 1_000_000_000L // Approximate month in nanoseconds
+                                val cutoffTime = currentTime - (timeframeMonths * nanosecondsInMonth)
+
+                                allData.filter { it.date >= cutoffTime }
+                            }
                         }
                     )
 
@@ -323,7 +348,8 @@ class ProbabilityCalculatorService: Service() {
 Asset Analysis Report
 =====================
 
-Symbol: $symbolName ($symbolId)
+Symbol: $symbolName 
+(last price: $lastPrice EUR)
 Analysis Date: ${
             java.text.SimpleDateFormat(
                 "dd.MM.yyyy HH:mm",
@@ -332,8 +358,12 @@ Analysis Date: ${
         }
 
 Price Band Analysis:
+What is the probability the price will touch:
+- upper band of: ${String.format("%.2f", upperBand)} EUR 
+- lower band of: ${String.format("%.2f", lowerBand)} EUR 
+at any point during the next $days days.
 
-What is the probability the price will touch ${String.format("%.2f", upperBand)} EUR and ${String.format("%.2f", lowerBand)} EUR at any point during the next $days days.
+Input size: $inputSize
 
 Probabilistic Forecaster (Finance School) (T)
 =====================

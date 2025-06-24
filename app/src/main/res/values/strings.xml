@@ -22,7 +22,7 @@
     <string name="lower_price_band">Lower price band</string>
     <string name="last_update_">Last update: 10.10.2025</string>
     <string name="asset_title">Asset title</string>
-    <string name="calculation_">Calculation</string>
+    <string name="calculation_">Calculation in progress… </string>
     <string name="asset_title_calculation">Asset title calculation</string>
     <string name="symbol_id">Symbol ID</string>
     <string name="symbol_name">Symbol Name</string>
@@ -33,4 +33,10 @@
     <string name="report">Report</string>
     <string name="update_all">Update all</string>
     <string name="preparing_msg">Preparing...</string>
+    <string name="data_timeframe">Data Timeframe</string>
+    <string name="three_months_recent_patterns">3 months (recent patterns)</string>
+    <string name="six_months_balanced">6 months (balanced)</string>
+    <string name="one_year_business_cycle">1 year (business cycle)</string>
+    <string name="two_years_extended_history">2 years (extended history)</string>
+    <string name="all_data_full_dataset">All data (full dataset)</string>
 </resources>

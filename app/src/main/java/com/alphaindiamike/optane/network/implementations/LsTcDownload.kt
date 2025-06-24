@@ -2,7 +2,6 @@ package com.alphaindiamike.optane.network.implementations
 
 import com.alphaindiamike.optane.network.NetworkCapRepository
 import com.alphaindiamike.optane.network.model.NetworkException
-import com.alphaindiamike.optane.database.entities.TimeSeriesEntity
 import com.alphaindiamike.optane.network.model.HistoryRequest
 import com.alphaindiamike.optane.network.model.InstrumentChartResponse
 import com.alphaindiamike.optane.network.model.RawTimeSeriesData
@@ -11,9 +10,7 @@ import java.net.URL
 import java.net.HttpURLConnection
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.util.Date
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 
@@ -28,7 +25,7 @@ class LsTcDownload : NetworkCapRepository{
         "Accept-Language" to "en-US,en;q=0.9"
     )
 
-    override suspend fun downloadLsTcSingleAssetData(instrumentId: String): List<RawTimeSeriesData> {
+    override suspend fun fetchNetworkData(instrumentId: String): List<RawTimeSeriesData> {
         return withContext(
             // Coroutine Context
             Dispatchers.IO,
